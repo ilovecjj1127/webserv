@@ -1,0 +1,9 @@
+.vscode/
+*.out
+*.a
+*.o
+temp/
+obj/
+valgrind*
+suppressions.supp
+webserv
