@@ -64,12 +64,12 @@ void Webserv::_mainLoop( void ) {
 			continue;
 		}
 		std::cout << "Accepted a connection" << std::endl;
+		std::string request = _getClientRequest(client_fd);
+		if (request == "") {
+			continue;
+		}
+		str_map headers = _parseHeaders(request);
 		_sendHtml(client_fd, "./nginx_example/html/index.html");
-		// const char* response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nHello, World!";
-		// if (send(client_fd, response, strlen(response), 0) < 0) {
-		// 	std::cout << "Send failed" << std::endl;
-		// 	continue;
-		// }
 		close(client_fd);
 		std::cout << "Connection was closed " << std::endl;
 	}
@@ -97,6 +97,43 @@ std::string Webserv::_getHtmlHeader( size_t content_length ) {
 	header += "Content-Type: text/html\r\n";
 	header += "Content-Length: " + std::to_string(content_length) + "\r\n\r\n";
 	return header;
+}
+
+std::string Webserv::_getClientRequest( int client_fd ) {
+	char buffer[4096];
+	std::string request;
+	while (true) {
+		ssize_t bytes = recv(client_fd, buffer, sizeof(buffer), 0);
+		if (bytes < 0) {
+			perror("Recv failed"); // Maybe not allowed
+			close(client_fd);
+			return "";
+		} else if (bytes > 0) {
+			request.append(buffer, bytes);
+		}
+		if (bytes < (ssize_t)sizeof(buffer)) {
+			break;
+		}
+	}
+	return request;
+}
+
+str_map Webserv::_parseHeaders( std::string& request ) {
+	str_map headers;
+	std::istringstream request_stream(request);
+	std::string line;
+	std::getline(request_stream, line);
+	std::cout << line << std::endl; // Need to parse first line
+	while(std::getline(request_stream, line) && line != "\r") {
+		std::cout << line << std::endl;
+		size_t delimiter = line.find(": ");
+		if (delimiter != std::string::npos) {
+			std::string key = line.substr(0, delimiter);
+			std::string value = line.substr(delimiter + 2);
+			headers[key] = value;
+		}
+	}
+	return headers;
 }
 
 void Webserv::_stopServer( void ) {

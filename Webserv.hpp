@@ -4,12 +4,16 @@
 #include <iostream>
 #include <fstream>
 #include <sstream>
+#include <string>
 #include <cstring>
 #include <csignal>
+#include <map>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <unistd.h>
+
+using str_map = std::map<std::string, std::string>;
 
 class Webserv {
 private:
@@ -27,6 +31,8 @@ private:
 	void _mainLoop( void );
 	void _sendHtml( int client_fd, const std::string& file_path );
 	std::string _getHtmlHeader( size_t content_length );
+	std::string _getClientRequest( int client_fd );
+	str_map _parseHeaders( std::string& request );
 
 public:
 	Webserv( const Webserv& ) = delete;
