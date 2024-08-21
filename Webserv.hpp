@@ -2,6 +2,8 @@
 #define WEBSERV_HPP
 
 #include <iostream>
+#include <fstream>
+#include <sstream>
 #include <cstring>
 #include <csignal>
 #include <sys/types.h>
@@ -23,6 +25,8 @@ private:
 	void _stopServer( void );
 	int _initServer( void );
 	void _mainLoop( void );
+	void _sendHtml( int client_fd, const std::string& file_path );
+	std::string _getHtmlHeader( size_t content_length );
 
 public:
 	Webserv( const Webserv& ) = delete;
