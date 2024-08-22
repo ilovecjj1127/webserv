@@ -15,6 +15,19 @@
 
 using str_map = std::map<std::string, std::string>;
 
+enum Method {
+	GET,
+	POST,
+	DELETE
+};
+
+struct Request {
+	Method		method;
+	std::string	path;
+	str_map		headers;
+	std::string	body;
+};
+
 class Webserv {
 private:
 	Webserv( void );
@@ -31,12 +44,15 @@ private:
 	void _mainLoop( void );
 	void _sendHtml( int client_fd, const std::string& file_path );
 	std::string _getHtmlHeader( size_t content_length );
-	std::string _getClientRequest( int client_fd );
-	str_map _parseHeaders( std::string& request );
+	int _getClientRequest( int client_fd, Request& request );
+	int _parseRequest( const std::string& r, Request& request );
+	int _parseRequestLine( const std::string& line, Request& request );
 
 public:
 	Webserv( const Webserv& ) = delete;
 	Webserv& operator = ( const Webserv& ) = delete;
+
+	static const std::map<std::string, Method> methods;
 
 	static Webserv& getInstance( void );
 	static void handleSigInt(int signum);

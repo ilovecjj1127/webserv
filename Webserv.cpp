@@ -2,6 +2,12 @@
 
 Webserv Webserv::_instance;
 
+const std::map<std::string, Method> Webserv::methods = {
+	{"GET", GET},
+	{"POST", POST},
+	{"DELETE", DELETE}
+};
+
 Webserv::Webserv( void ) {
 	std::cout << "Webserv instance created" << std::endl;
 	_keep_running = true;
@@ -64,11 +70,10 @@ void Webserv::_mainLoop( void ) {
 			continue;
 		}
 		std::cout << "Accepted a connection" << std::endl;
-		std::string request = _getClientRequest(client_fd);
-		if (request == "") {
+		Request request;
+		if (_getClientRequest(client_fd, request) != 0) {
 			continue;
 		}
-		str_map headers = _parseHeaders(request);
 		_sendHtml(client_fd, "./nginx_example/html/index.html");
 		close(client_fd);
 		std::cout << "Connection was closed " << std::endl;
@@ -99,41 +104,69 @@ std::string Webserv::_getHtmlHeader( size_t content_length ) {
 	return header;
 }
 
-std::string Webserv::_getClientRequest( int client_fd ) {
+int Webserv::_getClientRequest( int client_fd, Request& request ) {
 	char buffer[4096];
-	std::string request;
+	std::string r;
 	while (true) {
 		ssize_t bytes = recv(client_fd, buffer, sizeof(buffer), 0);
 		if (bytes < 0) {
 			perror("Recv failed"); // Maybe not allowed
 			close(client_fd);
-			return "";
+			return 1;
 		} else if (bytes > 0) {
-			request.append(buffer, bytes);
+			r.append(buffer, bytes);
 		}
 		if (bytes < (ssize_t)sizeof(buffer)) {
 			break;
 		}
 	}
-	return request;
+	return _parseRequest(r, request);
 }
 
-str_map Webserv::_parseHeaders( std::string& request ) {
-	str_map headers;
-	std::istringstream request_stream(request);
+int Webserv::_parseRequest( const std::string& r, Request& request ) {
+	std::istringstream request_stream(r);
 	std::string line;
 	std::getline(request_stream, line);
-	std::cout << line << std::endl; // Need to parse first line
-	while(std::getline(request_stream, line) && line != "\r") {
-		std::cout << line << std::endl;
-		size_t delimiter = line.find(": ");
-		if (delimiter != std::string::npos) {
-			std::string key = line.substr(0, delimiter);
-			std::string value = line.substr(delimiter + 2);
-			headers[key] = value;
-		}
+	if (_parseRequestLine(line, request) != 0) {
+		return 1;
+	} else if (request_stream.eof()) {
+		return 0;
 	}
-	return headers;
+	while(std::getline(request_stream, line) && line != "\r") {
+		size_t delimiter = line.find(": ");
+		if (delimiter == std::string::npos) {
+			return 1;
+		} else if (!line.empty() && line.back() == '\r') {
+			line.pop_back();
+		}
+		std::string key = line.substr(0, delimiter);
+		std::string value = line.substr(delimiter + 2);
+		request.headers[key] = value;		
+	}
+	if (request_stream) {
+		std::getline(request_stream, request.body, '\0');
+	}
+	if (request_stream.eof()) {
+		return 0;
+	}
+	return 1;
+}
+
+int Webserv::_parseRequestLine( const std::string& line,
+								Request& request ) {
+	size_t space1 = line.find(" ");
+	size_t space2 = line.rfind(" ");
+	if (space1 == space2 || line.substr(space2) != " HTTP/1.1\r") {
+		return 1;
+	}
+	auto it = methods.find(line.substr(0, space1));
+	if (it != methods.end()) {
+		request.method = it->second;
+	} else {
+		return 1;
+	}
+	request.path = line.substr(space1 + 1, space2); // Need to validate it
+	return 0;
 }
 
 void Webserv::_stopServer( void ) {
