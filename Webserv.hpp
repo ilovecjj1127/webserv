@@ -24,6 +24,7 @@ enum Method {
 struct Request {
 	Method		method;
 	std::string	path;
+	str_map		params;
 	str_map		headers;
 	std::string	body;
 };
@@ -47,6 +48,7 @@ private:
 	int _getClientRequest( int client_fd, Request& request );
 	int _parseRequest( const std::string& r, Request& request );
 	int _parseRequestLine( const std::string& line, Request& request );
+	int _parseRequestTarget( const std::string& line, Request& request );
 
 public:
 	Webserv( const Webserv& ) = delete;
@@ -58,6 +60,9 @@ public:
 	static void handleSigInt(int signum);
 
 	int startServer( void );
+
+	// Debug functions:
+	void printRequest( const Request& request ) const; 
 };
 
 #endif
