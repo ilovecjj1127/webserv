@@ -64,14 +64,39 @@ void Webserv::_mainLoop( void ) {
 			continue;
 		}
 		std::cout << "Accepted a connection" << std::endl;
-		const char* response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nHello, World!";
-		if (send(client_fd, response, strlen(response), 0) < 0) {
-			std::cout << "Send failed" << std::endl;
+		Request request;
+		if (_getClientRequest(client_fd, request) != 0) {
 			continue;
 		}
+		printRequest(request);
+		_sendHtml(client_fd, "./nginx_example/html/index.html");
 		close(client_fd);
 		std::cout << "Connection was closed " << std::endl;
 	}
+}
+
+void Webserv::_sendHtml(int client_fd, const std::string& file_path) {
+	std::ifstream file(file_path);
+	if (!file.is_open()) {
+		std::cerr << "Failed to open file: " << file_path << std::endl;
+		std::string page404 = "HTTP/1.1 404 Not Found\r\nContent-Length: 13\r\n\r\n404 Not Found";
+		send(client_fd, page404.c_str(), page404.size(), 0);
+		return;
+	}
+	std::stringstream buffer;
+	buffer << file.rdbuf();
+	std::string html_content = buffer.str();
+	std::string header = _getHtmlHeader(html_content.size());
+	send(client_fd, header.c_str(), header.size(), 0);
+	send(client_fd, html_content.c_str(), html_content.size(), 0);
+	std::cout << "Sent HTML file: " << file_path << std::endl;
+}
+
+std::string Webserv::_getHtmlHeader( size_t content_length ) {
+	std::string header = "HTTP/1.1 200 OK\r\n";
+	header += "Content-Type: text/html\r\n";
+	header += "Content-Length: " + std::to_string(content_length) + "\r\n\r\n";
+	return header;
 }
 
 void Webserv::_stopServer( void ) {
