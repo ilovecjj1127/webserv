@@ -38,13 +38,19 @@ int Webserv::_initServer( void ) {
 	server_addr.sin_family = AF_INET;
 	server_addr.sin_addr.s_addr = INADDR_ANY;
 	server_addr.sin_port = htons(_listen_port);
+	int opt = 1;
+	if (setsockopt(_server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) == -1) {
+		perror("Failed to set socket opt");
+		close(_server_fd);
+		return 1;
+	}
 	if (bind(_server_fd, (sockaddr*)&server_addr, sizeof(server_addr)) == -1) {
-		std::cerr << "Failed to bind socket" << std::endl;
+		perror("Failed to bind socket");
 		close(_server_fd);
 		return 1;
 	}
 	if (listen(_server_fd, 10) == -1) {
-		std::cerr << "Failed to listen on socket" << std::endl;
+		perror("Failed to listen on socket");
 		close(_server_fd);
 		return 1;
 	}
