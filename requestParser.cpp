@@ -58,6 +58,7 @@ int Webserv::_parseRequestLine( const std::string& line,
 								Request& request ) {
 	size_t space1 = line.find(" ");
 	size_t space2 = line.rfind(" ");
+	std::cout << "Request line: " << line << "\n\n";
 	if (space1 == space2 || line.substr(space2) != " HTTP/1.1\r") {
 		return 1;
 	}
@@ -71,14 +72,29 @@ int Webserv::_parseRequestLine( const std::string& line,
 	return _parseRequestTarget(target, request);
 }
 
-// Has to be improved
-int Webserv::_parseRequestTarget( const std::string& line,
-								  Request& request ) {
+int	Webserv::_parseRequestTarget( const std::string& line, Request& request ) {
 	if (line.empty() || line[0] != '/') {
 		return 1;
 	}
-	size_t delimiter = line.find("?");
+	size_t	delimiter = line.find("?");
 	request.path = line.substr(0, delimiter);
-	// Need to add request.params
-	return 0;
+	if (delimiter == std::string::npos) {
+		return 0;
+	}
+	std::istringstream	query_stream(line.substr(delimiter + 1));
+	std::string	param_str;
+	while (std::getline(query_stream, param_str, '&')) {
+		std::string::size_type equal_pos = param_str.find('=');
+		if (equal_pos != std::string::npos) {
+			std::string key = param_str.substr(0, equal_pos);
+			std::string value = param_str.substr(equal_pos + 1);
+			request.params[key] = value;
+		} else {
+			request.params[param_str] = "";
+		}
+	}
+	if (query_stream.eof()) {
+		return 0;
+	}
+	return 1;
 }
