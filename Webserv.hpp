@@ -39,12 +39,15 @@ private:
 	bool _keep_running;
 	int _server_fd;
 	uint16_t _listen_port;
+	std::string _root_path;
+	std::string _index_page;
+	std::string _error_page_404;
 
 	void _stopServer( void );
 	int _initServer( void );
 	void _mainLoop( void );
-	void _sendHtml( int client_fd, const std::string& file_path );
-	std::string _getHtmlHeader( size_t content_length );
+	void _sendHtml( int client_fd, const std::string& file_path, size_t status_code = 200 );
+	std::string _getHtmlHeader( size_t content_length, size_t status_code );
 	int _getClientRequest( int client_fd, Request& request );
 	int _parseRequest( const std::string& r, Request& request );
 	int _parseRequestLine( const std::string& line, Request& request );
