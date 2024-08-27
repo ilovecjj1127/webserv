@@ -12,8 +12,7 @@ int Webserv::_getClientRequest( int client_fd, Request& request ) {
 	while (true) {
 		ssize_t bytes = recv(client_fd, buffer, sizeof(buffer), 0);
 		if (bytes < 0) {
-			perror("Recv failed"); // Maybe not allowed
-			close(client_fd);
+			perror("Recv failed");
 			return 1;
 		} else if (bytes > 0) {
 			r.append(buffer, bytes);
@@ -58,7 +57,6 @@ int Webserv::_parseRequestLine( const std::string& line,
 								Request& request ) {
 	size_t space1 = line.find(" ");
 	size_t space2 = line.rfind(" ");
-	std::cout << "Request line: " << line << "\n\n";
 	if (space1 == space2 || line.substr(space2) != " HTTP/1.1\r") {
 		return 1;
 	}

@@ -7,6 +7,7 @@
 #include <string>
 #include <cstring>
 #include <csignal>
+#include <fcntl.h>
 #include <map>
 #include <sys/epoll.h>
 #include <sys/socket.h>
@@ -39,6 +40,8 @@ private:
 
 	bool _keep_running;
 	int _server_fd;
+	int _epoll_fd;
+	size_t _event_array_size;
 	uint16_t _listen_port;
 	std::string _root_path;
 	std::string _index_page;
@@ -46,6 +49,8 @@ private:
 
 	void _stopServer( void );
 	int _initServer( void );
+	int _initError( const char* err_msg );
+	int _setNonBlocking( int fd );
 	void _mainLoop( void );
 	void _sendHtml( int client_fd, const std::string& file_path, size_t status_code = 200 );
 	std::string _getHtmlHeader( size_t content_length, size_t status_code );

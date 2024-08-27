@@ -6,6 +6,8 @@ Webserv::Webserv( void ) {
 	std::cout << "Webserv instance created" << std::endl;
 	_keep_running = true;
 	_server_fd = -1;
+	_epoll_fd = -1;
+	_event_array_size = 16;
 	_listen_port = 8081;
 	_root_path = "./nginx_example/html";
 	_index_page = "/index.html";
@@ -31,8 +33,7 @@ int Webserv::startServer( void ) {
 int Webserv::_initServer( void ) {
 	_server_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 	if (_server_fd == -1) {
-		std::cerr << "Failed to create socket" << std::endl;
-		return 1;
+		return _initError("Failed to create socket");
 	}
 	sockaddr_in server_addr;
 	server_addr.sin_family = AF_INET;
@@ -40,48 +41,103 @@ int Webserv::_initServer( void ) {
 	server_addr.sin_port = htons(_listen_port);
 	int opt = 1;
 	if (setsockopt(_server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) == -1) {
-		perror("Failed to set socket opt");
-		close(_server_fd);
-		return 1;
+		return _initError("Failed to set socket opt");
 	}
 	if (bind(_server_fd, (sockaddr*)&server_addr, sizeof(server_addr)) == -1) {
-		perror("Failed to bind socket");
-		close(_server_fd);
-		return 1;
+		return _initError("Failed to bind socket");
 	}
-	if (listen(_server_fd, 10) == -1) {
-		perror("Failed to listen on socket");
-		close(_server_fd);
-		return 1;
+	if (listen(_server_fd, SOMAXCONN) == -1) {
+		return _initError("Failed to listen on socket");
 	}
-	std::cout << "Server is listening" << std::endl;
+	if (_setNonBlocking(_server_fd) == -1) {
+		return _initError("Failed to set non-blocking mode: server_fd");
+	}
+	_epoll_fd = epoll_create(1);
+	if (_epoll_fd == -1) {
+		return _initError("Failed to create epoll");
+	}
+	epoll_event event;
+	event.events = EPOLLIN;
+	event.data.fd = _server_fd;
+	if (epoll_ctl(_epoll_fd, EPOLL_CTL_ADD, _server_fd, &event) == -1) {
+		return _initError("Failed to add server_fd to epoll");
+	}
+	std::cout << "Server is running on port " << _listen_port << std::endl;
 	signal(SIGINT, handleSigInt);
 	return 0;
 }
 
-void Webserv::_mainLoop( void ) {
-	while (true) {
-		sockaddr_in client_addr;
-		socklen_t client_len = sizeof(client_addr);
-		int client_fd = accept(_server_fd, (sockaddr*)&client_addr, &client_len);
-		if (client_fd == -1) {
-			if (!_keep_running) {
-				std::cout << "\nInterrupted by signal" << std::endl;
-				break;
-			}
-			std::cerr << "Failed to accept connection" << std::endl;
-			continue;
-		}
-		std::cout << "Accepted a connection" << std::endl;
-		Request request;
-		if (_getClientRequest(client_fd, request) != 0) {
-			continue;
-		}
-		printRequest(request);
-		_sendHtml(client_fd, request.path);
-		close(client_fd);
-		std::cout << "Connection was closed " << std::endl;
+int Webserv::_initError( const char* err_msg ) {
+	perror(err_msg);
+	if (_server_fd != -1) {
+		close(_server_fd);
 	}
+	if (_epoll_fd != -1) {
+		close(_epoll_fd);
+	}
+	return 1;
+}
+
+int Webserv::_setNonBlocking( int fd ) {
+	int flags = fcntl(fd, F_GETFL, 0);
+	if (flags == -1) {
+		return -1;
+	}
+	flags |= O_NONBLOCK;
+	return fcntl(fd, F_SETFL, flags);
+}
+
+void Webserv::_mainLoop( void ) {
+	epoll_event events[_event_array_size];
+	epoll_event event;
+	while (true) {
+		int n = epoll_wait(_epoll_fd, events, _event_array_size, -1);
+		if ( n == -1) {
+			perror("epoll_wait");
+			break;
+		}
+		for (int i = 0; i < n; ++i) {
+			if (events[i].data.fd == _server_fd) {
+				// Handle new incoming connection
+				sockaddr_in client_addr;
+				socklen_t client_len = sizeof(client_addr);
+				int client_fd = accept(_server_fd, (sockaddr*)&client_addr, &client_len);
+				if (client_fd == -1) {
+					perror("Failed to accept connection");
+					continue;
+				}
+				if (_setNonBlocking(client_fd) == -1) {
+					perror("Failed to set non-blocking mode: client_fd");
+					close(client_fd);
+					continue;
+				}
+				event.events = EPOLLIN | EPOLLET;
+				event.data.fd = client_fd;
+				if (epoll_ctl(_epoll_fd, EPOLL_CTL_ADD, client_fd, &event) == -1) {
+					perror("epoll_ctl: client_fd");
+					close(client_fd);
+					continue;
+				}
+				std::cout << "Accepted connection on client_fd " << client_fd << std::endl;
+			} else {
+				// Handle data from client
+				int client_fd = events[i].data.fd;
+				Request request;
+				if (_getClientRequest(client_fd, request) == 0) {
+					// Now it works only with correct requests. Should be changed
+					printRequest(request);
+					_sendHtml(client_fd, request.path);
+				}
+				close(client_fd);
+				std::cout << "Connection was closed. Client_fd: " << client_fd << std::endl;
+			}
+		}
+		if (!_keep_running) {
+			std::cout << "\nInterrupted by signal" << std::endl;
+			break;
+		}
+	}
+	close(_epoll_fd);
 }
 
 void Webserv::_sendHtml(int client_fd, const std::string& file_path, size_t status_code) {
