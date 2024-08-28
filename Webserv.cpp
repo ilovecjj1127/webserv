@@ -90,10 +90,10 @@ int Webserv::_setNonBlocking( int fd ) {
 void Webserv::_mainLoop( void ) {
 	epoll_event events[_event_array_size];
 	epoll_event event;
-	while (true) {
+	while (_keep_running) {
 		int n = epoll_wait(_epoll_fd, events, _event_array_size, -1);
 		if ( n == -1) {
-			perror("epoll_wait");
+			if (_keep_running) perror("epoll_wait");
 			break;
 		}
 		for (int i = 0; i < n; ++i) {
@@ -105,17 +105,17 @@ void Webserv::_mainLoop( void ) {
 				if (client_fd == -1) {
 					perror("Failed to accept connection");
 					continue;
+				} else {
+					_open_clients_fds.insert(client_fd);
 				}
 				if (_setNonBlocking(client_fd) == -1) {
-					perror("Failed to set non-blocking mode: client_fd");
-					close(client_fd);
+					_closeClientFd(client_fd, "Failed to set non-blocking mode: client_fd");
 					continue;
 				}
 				event.events = EPOLLIN | EPOLLET;
 				event.data.fd = client_fd;
 				if (epoll_ctl(_epoll_fd, EPOLL_CTL_ADD, client_fd, &event) == -1) {
-					perror("epoll_ctl: client_fd");
-					close(client_fd);
+					_closeClientFd(client_fd, "epoll_ctl: client_fd");
 					continue;
 				}
 				std::cout << "Accepted connection on client_fd " << client_fd << std::endl;
@@ -128,7 +128,7 @@ void Webserv::_mainLoop( void ) {
 					printRequest(request);
 					_sendHtml(client_fd, request.path);
 				}
-				close(client_fd);
+				_closeClientFd(client_fd, nullptr);
 				std::cout << "Connection was closed. Client_fd: " << client_fd << std::endl;
 			}
 		}
@@ -137,10 +137,22 @@ void Webserv::_mainLoop( void ) {
 			break;
 		}
 	}
+	for (int client_id : _open_clients_fds) {
+		close(client_id);
+	}
 	close(_epoll_fd);
+	if (!_keep_running) std::cout << "\nInterrupted by signal" << std::endl;
 }
 
-void Webserv::_sendHtml(int client_fd, const std::string& file_path, size_t status_code) {
+void Webserv::_closeClientFd( int client_fd, const char* err_msg ) {
+	close(client_fd);
+	_open_clients_fds.erase(client_fd);
+	if (err_msg != nullptr) {
+		perror(err_msg);
+	}
+}
+
+void Webserv::_sendHtml( int client_fd, const std::string& file_path, size_t status_code ) {
 	if (file_path == "/" && file_path != _index_page) {
 		return _sendHtml(client_fd, _index_page, 200);
 	}

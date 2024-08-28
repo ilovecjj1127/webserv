@@ -9,6 +9,7 @@
 #include <csignal>
 #include <fcntl.h>
 #include <map>
+#include <unordered_set>
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -46,12 +47,14 @@ private:
 	std::string _root_path;
 	std::string _index_page;
 	std::string _error_page_404;
+	std::unordered_set<int> _open_clients_fds;
 
 	void _stopServer( void );
 	int _initServer( void );
 	int _initError( const char* err_msg );
 	int _setNonBlocking( int fd );
 	void _mainLoop( void );
+	void _closeClientFd( int client_fd, const char* err_msg );
 	void _sendHtml( int client_fd, const std::string& file_path, size_t status_code = 200 );
 	std::string _getHtmlHeader( size_t content_length, size_t status_code );
 	int _getClientRequest( int client_fd, Request& request );
