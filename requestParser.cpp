@@ -1,31 +1,30 @@
 #include "Webserv.hpp"
 
-const std::map<std::string, Method> Webserv::methods = {
+const std::unordered_map<std::string, Method> Webserv::methods = {
 	{"GET", GET},
 	{"POST", POST},
 	{"DELETE", DELETE}
 };
 
-int Webserv::_getClientRequest( int client_fd, Request& request ) {
+int Webserv::_getClientRequest( int client_fd ) {
 	char buffer[4096];
-	std::string r;
-	while (true) {
-		ssize_t bytes = recv(client_fd, buffer, sizeof(buffer), 0);
-		if (bytes < 0) {
-			perror("Recv failed");
-			return 1;
-		} else if (bytes > 0) {
-			r.append(buffer, bytes);
-		}
-		if (bytes < (ssize_t)sizeof(buffer)) {
-			break;
-		}
+	Request& request = _clients_map[client_fd];
+	ssize_t bytes = recv(client_fd, buffer, sizeof(buffer), 0);
+	if (bytes < 0) {
+		_closeClientFd(client_fd, "Recv failed");
+		return 1;
+	} else {
+		request.request_str.append(buffer, bytes);
 	}
-	return _parseRequest(r, request);
+	if (_parseRequest(request) == 0) {
+		return 0;
+	}
+	_closeClientFd(client_fd, nullptr);
+	return 1;
 }
 
-int Webserv::_parseRequest( const std::string& r, Request& request ) {
-	std::istringstream request_stream(r);
+int Webserv::_parseRequest( Request& request ) {
+	std::istringstream request_stream(request.request_str);
 	std::string line;
 	std::getline(request_stream, line);
 	if (_parseRequestLine(line, request) != 0) {

@@ -8,15 +8,14 @@
 #include <cstring>
 #include <csignal>
 #include <fcntl.h>
-#include <map>
-#include <unordered_set>
+#include <unordered_map>
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <netinet/in.h>
 #include <unistd.h>
 
-using str_map = std::map<std::string, std::string>;
+using str_map = std::unordered_map<std::string, std::string>;
 
 enum Method {
 	GET,
@@ -30,6 +29,8 @@ struct Request {
 	str_map		params;
 	str_map		headers;
 	std::string	body;
+	std::string request_str;
+	std::string	response;
 };
 
 class Webserv {
@@ -47,7 +48,7 @@ private:
 	std::string _root_path;
 	std::string _index_page;
 	std::string _error_page_404;
-	std::unordered_set<int> _open_clients_fds;
+	std::unordered_map<int, Request> _clients_map;
 
 	void _stopServer( void );
 	int _initServer( void );
@@ -55,10 +56,14 @@ private:
 	int _setNonBlocking( int fd );
 	void _mainLoop( void );
 	void _closeClientFd( int client_fd, const char* err_msg );
-	void _sendHtml( int client_fd, const std::string& file_path, size_t status_code = 200 );
 	std::string _getHtmlHeader( size_t content_length, size_t status_code );
-	int _getClientRequest( int client_fd, Request& request );
-	int _parseRequest( const std::string& r, Request& request );
+	void _handleConnection( void );
+	void _modifyEpollSocketOut( int client_fd );
+	void _sendResponse( int client_fd );
+	std::string _prepareResponse( const std::string& file_path, size_t status_code = 200 );
+
+	int _getClientRequest( int client_fd );
+	int _parseRequest( Request& request );
 	int _parseRequestLine( const std::string& line, Request& request );
 	int _parseRequestTarget( const std::string& line, Request& request );
 
@@ -66,7 +71,7 @@ public:
 	Webserv( const Webserv& ) = delete;
 	Webserv& operator = ( const Webserv& ) = delete;
 
-	static const std::map<std::string, Method> methods;
+	static const std::unordered_map<std::string, Method> methods;
 
 	static Webserv& getInstance( void );
 	static void handleSigInt(int signum);

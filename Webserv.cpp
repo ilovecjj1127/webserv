@@ -89,7 +89,6 @@ int Webserv::_setNonBlocking( int fd ) {
 
 void Webserv::_mainLoop( void ) {
 	epoll_event events[_event_array_size];
-	epoll_event event;
 	while (_keep_running) {
 		int n = epoll_wait(_epoll_fd, events, _event_array_size, -1);
 		if ( n == -1) {
@@ -98,38 +97,16 @@ void Webserv::_mainLoop( void ) {
 		}
 		for (int i = 0; i < n; ++i) {
 			if (events[i].data.fd == _server_fd) {
-				// Handle new incoming connection
-				sockaddr_in client_addr;
-				socklen_t client_len = sizeof(client_addr);
-				int client_fd = accept(_server_fd, (sockaddr*)&client_addr, &client_len);
-				if (client_fd == -1) {
-					perror("Failed to accept connection");
-					continue;
-				} else {
-					_open_clients_fds.insert(client_fd);
-				}
-				if (_setNonBlocking(client_fd) == -1) {
-					_closeClientFd(client_fd, "Failed to set non-blocking mode: client_fd");
-					continue;
-				}
-				event.events = EPOLLIN | EPOLLET;
-				event.data.fd = client_fd;
-				if (epoll_ctl(_epoll_fd, EPOLL_CTL_ADD, client_fd, &event) == -1) {
-					_closeClientFd(client_fd, "epoll_ctl: client_fd");
-					continue;
-				}
-				std::cout << "Accepted connection on client_fd " << client_fd << std::endl;
-			} else {
-				// Handle data from client
+				_handleConnection();
+			} else if (events[i].events & EPOLLIN) {
 				int client_fd = events[i].data.fd;
-				Request request;
-				if (_getClientRequest(client_fd, request) == 0) {
-					// Now it works only with correct requests. Should be changed
-					printRequest(request);
-					_sendHtml(client_fd, request.path);
+				Request& request = _clients_map[client_fd];
+				if (_getClientRequest(client_fd) == 0) {
+					request.response = _prepareResponse(request.path);
+					_modifyEpollSocketOut(client_fd);
 				}
-				_closeClientFd(client_fd, nullptr);
-				std::cout << "Connection was closed. Client_fd: " << client_fd << std::endl;
+			} else if (events[i].events & EPOLLOUT) {
+				_sendResponse(events[i].data.fd);
 			}
 		}
 		if (!_keep_running) {
@@ -137,43 +114,84 @@ void Webserv::_mainLoop( void ) {
 			break;
 		}
 	}
-	for (int client_id : _open_clients_fds) {
-		close(client_id);
+	for (const auto &client_pair : _clients_map) {
+		close(client_pair.first);
 	}
 	close(_epoll_fd);
 	if (!_keep_running) std::cout << "\nInterrupted by signal" << std::endl;
 }
 
+void Webserv::_handleConnection( void ) {
+	sockaddr_in client_addr;
+	socklen_t client_len = sizeof(client_addr);
+	int client_fd = accept(_server_fd, (sockaddr*)&client_addr, &client_len);
+	if (client_fd == -1) {
+		perror("Failed to accept connection");
+		return;
+	} else {
+		_clients_map[client_fd];
+	}
+	if (_setNonBlocking(client_fd) == -1) {
+		_closeClientFd(client_fd, "Failed to set non-blocking mode: client_fd");
+		return;
+	}
+	epoll_event event;
+	event.events = EPOLLIN | EPOLLET;
+	event.data.fd = client_fd;
+	if (epoll_ctl(_epoll_fd, EPOLL_CTL_ADD, client_fd, &event) == -1) {
+		_closeClientFd(client_fd, "epoll_ctl: add client_fd");
+		return;
+	}
+	std::cout << "Accepted connection on client_fd " << client_fd << std::endl;
+}
+
 void Webserv::_closeClientFd( int client_fd, const char* err_msg ) {
 	close(client_fd);
-	_open_clients_fds.erase(client_fd);
+	_clients_map.erase(client_fd);
 	if (err_msg != nullptr) {
 		perror(err_msg);
 	}
 }
 
-void Webserv::_sendHtml( int client_fd, const std::string& file_path, size_t status_code ) {
+void Webserv::_modifyEpollSocketOut( int client_fd ) {
+	epoll_event event;
+	event.events = EPOLLOUT | EPOLLET;
+	event.data.fd = client_fd;
+	if (epoll_ctl(_epoll_fd, EPOLL_CTL_MOD, client_fd, &event) == -1) {
+		_closeClientFd(client_fd, "epoll_ctl: mod client_fd");
+	}
+}
+
+std::string Webserv::_prepareResponse( const std::string& file_path, size_t status_code ) {
 	if (file_path == "/" && file_path != _index_page) {
-		return _sendHtml(client_fd, _index_page, 200);
+		return _prepareResponse(_index_page, 200);
 	}
 	std::string full_path = _root_path + file_path;
 	std::ifstream file(full_path);
 	if (!file.is_open() && file_path != _error_page_404) {
 		std::cerr << "Failed to open file: " << full_path << std::endl;
-		return _sendHtml(client_fd, _error_page_404, 404);
+		return _prepareResponse(_error_page_404, 404);
 	} else if (!file.is_open()) {
 		std::cerr << "Failed to open file: " << full_path << std::endl;
 		std::string page404 = "HTTP/1.1 404 Not Found\r\nContent-Length: 13\r\n\r\n404 Not Found";
-		send(client_fd, page404.c_str(), page404.size(), 0);
-		return;
+		return page404;
 	}
 	std::stringstream buffer;
 	buffer << file.rdbuf();
-	std::string html_content = buffer.str();
-	std::string header = _getHtmlHeader(html_content.size(), status_code);
-	send(client_fd, header.c_str(), header.size(), 0);
-	send(client_fd, html_content.c_str(), html_content.size(), 0);
-	std::cout << "Sent HTML file: " << full_path << std::endl;
+	std::string response = buffer.str();
+	response = _getHtmlHeader(response.size(), status_code) + response;
+	return response;
+}
+
+void Webserv::_sendResponse( int client_fd ) {
+	std::string& response = _clients_map[client_fd].response;
+	ssize_t bytes_sent = send(client_fd, response.c_str(), response.size(), 0);
+	if (bytes_sent == -1) {
+		_closeClientFd(client_fd, "send: error");
+	} else {
+		_closeClientFd(client_fd, nullptr);
+	}
+	std::cout << "Connection was closed. Client_fd: " << client_fd << std::endl;
 }
 
 std::string Webserv::_getHtmlHeader( size_t content_length, size_t status_code ) {
