@@ -1,5 +1,4 @@
-#ifndef WEBSERV_HPP
-#define WEBSERV_HPP
+#pragma once
 
 #include <iostream>
 #include <fstream>
@@ -14,6 +13,8 @@
 #include <sys/types.h>
 #include <netinet/in.h>
 #include <unistd.h>
+
+#include "Logger.hpp"
 
 using str_map = std::unordered_map<std::string, std::string>;
 
@@ -73,6 +74,8 @@ public:
 
 	static const std::unordered_map<std::string, Method> methods;
 
+	Logger logger;
+
 	static Webserv& getInstance( void );
 	static void handleSigInt(int signum);
 
@@ -81,5 +84,3 @@ public:
 	// Debug functions:
 	void printRequest( const Request& request ) const; 
 };
-
-#endif
