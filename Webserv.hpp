@@ -2,7 +2,6 @@
 
 #include <iostream>
 #include <fstream>
-#include <sstream>
 #include <string>
 #include <cstring>
 #include <csignal>
@@ -15,22 +14,10 @@
 #include <unistd.h>
 
 #include "Logger.hpp"
+#include "Request.hpp"
 
-using str_map = std::unordered_map<std::string, std::string>;
-
-enum Method {
-	GET,
-	POST,
-	DELETE
-};
-
-struct Request {
-	Method		method;
-	std::string	path;
-	str_map		params;
-	str_map		headers;
-	std::string	body;
-	std::string request_str;
+struct ClientData {
+	Request		request;
 	std::string	response;
 };
 
@@ -49,7 +36,7 @@ private:
 	std::string _root_path;
 	std::string _index_page;
 	std::string _error_page_404;
-	std::unordered_map<int, Request> _clients_map;
+	std::unordered_map<int, ClientData> _clients_map;
 
 	void _stopServer( void );
 	int _initServer( void );
@@ -62,17 +49,11 @@ private:
 	void _modifyEpollSocketOut( int client_fd );
 	void _sendResponse( int client_fd );
 	std::string _prepareResponse( const std::string& file_path, size_t status_code = 200 );
-
 	int _getClientRequest( int client_fd );
-	int _parseRequest( Request& request );
-	int _parseRequestLine( const std::string& line, Request& request );
-	int _parseRequestTarget( const std::string& line, Request& request );
 
 public:
 	Webserv( const Webserv& ) = delete;
 	Webserv& operator = ( const Webserv& ) = delete;
-
-	static const std::unordered_map<std::string, Method> methods;
 
 	Logger logger;
 
@@ -80,7 +61,4 @@ public:
 	static void handleSigInt(int signum);
 
 	int startServer( void );
-
-	// Debug functions:
-	void printRequest( const Request& request ) const; 
 };
