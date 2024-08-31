@@ -3,7 +3,8 @@
 Webserv Webserv::_instance;
 
 Webserv::Webserv( void ) {
-	std::cout << "Webserv instance created" << std::endl;
+	logger.setLevel(INFO);
+	logger.debug("Webserv instance created");
 	_keep_running = true;
 	_server_fd = -1;
 	_epoll_fd = -1;
@@ -15,7 +16,7 @@ Webserv::Webserv( void ) {
 }
 
 Webserv::~Webserv( void ) {
-	std::cout << "Webserv instance destroyed" << std::endl;
+	logger.debug("Webserv instance destroyed");
 }
 
 Webserv& Webserv::getInstance( void ) {
@@ -62,7 +63,7 @@ int Webserv::_initServer( void ) {
 	if (epoll_ctl(_epoll_fd, EPOLL_CTL_ADD, _server_fd, &event) == -1) {
 		return _initError("Failed to add server_fd to epoll");
 	}
-	std::cout << "Server is running on port " << _listen_port << std::endl;
+	logger.info("Server is listening on port " + std::to_string(_listen_port));
 	signal(SIGINT, handleSigInt);
 	return 0;
 }
@@ -109,16 +110,12 @@ void Webserv::_mainLoop( void ) {
 				_sendResponse(events[i].data.fd);
 			}
 		}
-		if (!_keep_running) {
-			std::cout << "\nInterrupted by signal" << std::endl;
-			break;
-		}
 	}
 	for (const auto &client_pair : _clients_map) {
 		close(client_pair.first);
 	}
 	close(_epoll_fd);
-	if (!_keep_running) std::cout << "\nInterrupted by signal" << std::endl;
+	if (!_keep_running) logger.info("Interrupted by signal");
 }
 
 void Webserv::_handleConnection( void ) {
@@ -142,7 +139,7 @@ void Webserv::_handleConnection( void ) {
 		_closeClientFd(client_fd, "epoll_ctl: add client_fd");
 		return;
 	}
-	std::cout << "Accepted connection on client_fd " << client_fd << std::endl;
+	logger.debug("Accepted connection on client_fd " + std::to_string(client_fd));
 }
 
 void Webserv::_closeClientFd( int client_fd, const char* err_msg ) {
@@ -169,10 +166,10 @@ std::string Webserv::_prepareResponse( const std::string& file_path, size_t stat
 	std::string full_path = _root_path + file_path;
 	std::ifstream file(full_path);
 	if (!file.is_open() && file_path != _error_page_404) {
-		std::cerr << "Failed to open file: " << full_path << std::endl;
+		logger.warning("Failed to open file: " + full_path);
 		return _prepareResponse(_error_page_404, 404);
 	} else if (!file.is_open()) {
-		std::cerr << "Failed to open file: " << full_path << std::endl;
+		logger.warning("Failed to open file: " + full_path);
 		std::string page404 = "HTTP/1.1 404 Not Found\r\nContent-Length: 13\r\n\r\n404 Not Found";
 		return page404;
 	}
@@ -191,7 +188,7 @@ void Webserv::_sendResponse( int client_fd ) {
 	} else {
 		_closeClientFd(client_fd, nullptr);
 	}
-	std::cout << "Connection was closed. Client_fd: " << client_fd << std::endl;
+	logger.debug("Connection was closed. Client_fd: " + std::to_string(client_fd));
 }
 
 std::string Webserv::_getHtmlHeader( size_t content_length, size_t status_code ) {
