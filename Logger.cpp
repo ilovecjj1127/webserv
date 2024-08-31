@@ -5,7 +5,9 @@ Logger::Logger( Level level ) : _level(level) {}
 Logger::Logger( const Logger& other ) : _level(other._level) {}
 
 Logger& Logger::operator = ( const Logger& other ) {
-	_level = other._level;
+	if (this != &other) {
+		_level = other._level;
+	}
 	return (*this);
 }
 

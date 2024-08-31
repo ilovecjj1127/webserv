@@ -101,9 +101,9 @@ void Webserv::_mainLoop( void ) {
 				_handleConnection();
 			} else if (events[i].events & EPOLLIN) {
 				int client_fd = events[i].data.fd;
-				Request& request = _clients_map[client_fd];
+				ClientData& client_data = _clients_map[client_fd];
 				if (_getClientRequest(client_fd) == 0) {
-					request.response = _prepareResponse(request.path);
+					client_data.response = _prepareResponse(client_data.request.path);
 					_modifyEpollSocketOut(client_fd);
 				}
 			} else if (events[i].events & EPOLLOUT) {
@@ -148,6 +148,26 @@ void Webserv::_closeClientFd( int client_fd, const char* err_msg ) {
 	if (err_msg != nullptr) {
 		perror(err_msg);
 	}
+}
+
+int Webserv::_getClientRequest( int client_fd ) {
+	char buffer[4096];
+	Request& request = _clients_map[client_fd].request;
+	ssize_t bytes = recv(client_fd, buffer, sizeof(buffer), 0);
+	if (bytes < 0) {
+		_closeClientFd(client_fd, "Recv failed");
+		return 1;
+	} else {
+		request.raw.append(buffer, bytes);
+	}
+	if (request.parseRequest() == 0) {
+		if (logger.getLevel() == DEBUG) {
+			request.printRequest();
+		}
+		return 0;
+	}
+	_closeClientFd(client_fd, nullptr);
+	return 1;
 }
 
 void Webserv::_modifyEpollSocketOut( int client_fd ) {
