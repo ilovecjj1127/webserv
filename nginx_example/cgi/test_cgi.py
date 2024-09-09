@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 import os
-import cgi 
+import cgi
 
 
 response = '''Content-Type: text/html
