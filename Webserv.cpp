@@ -3,7 +3,7 @@
 Webserv Webserv::_instance;
 
 Webserv::Webserv( void ) {
-	logger.setLevel(INFO);
+	logger.setLevel(DEBUG);
 	logger.debug("Webserv instance created");
 	_keep_running = true;
 	_server_fd = -1;
@@ -13,6 +13,7 @@ Webserv::Webserv( void ) {
 	_root_path = "./nginx_example/html";
 	_index_page = "/index.html";
 	_error_page_404 = "/404.html";
+	_chunk_size = 4096;
 }
 
 Webserv::~Webserv( void ) {
@@ -148,6 +149,7 @@ void Webserv::_closeClientFd( int client_fd, const char* err_msg ) {
 	if (err_msg != nullptr) {
 		perror(err_msg);
 	}
+	logger.debug("Connection was closed. Client_fd: " + std::to_string(client_fd));
 }
 
 int Webserv::_getClientRequest( int client_fd ) {
@@ -172,7 +174,7 @@ int Webserv::_getClientRequest( int client_fd ) {
 
 void Webserv::_modifyEpollSocketOut( int client_fd ) {
 	epoll_event event;
-	event.events = EPOLLOUT | EPOLLET;
+	event.events = EPOLLOUT;
 	event.data.fd = client_fd;
 	if (epoll_ctl(_epoll_fd, EPOLL_CTL_MOD, client_fd, &event) == -1) {
 		_closeClientFd(client_fd, "epoll_ctl: mod client_fd");
@@ -202,13 +204,25 @@ std::string Webserv::_prepareResponse( const std::string& file_path, size_t stat
 
 void Webserv::_sendResponse( int client_fd ) {
 	std::string& response = _clients_map[client_fd].response;
-	ssize_t bytes_sent = send(client_fd, response.c_str(), response.size(), 0);
-	if (bytes_sent == -1) {
-		_closeClientFd(client_fd, "send: error");
-	} else {
+	size_t bytes_sent_total = _clients_map[client_fd].bytes_sent_total;
+	std::size_t chunk_size = _chunk_size;
+	if (response.size() == bytes_sent_total) {
+		logger.debug("Nothing to send");
 		_closeClientFd(client_fd, nullptr);
+		return;
+	} else if (response.size() - bytes_sent_total < _chunk_size) {
+		chunk_size = response.size() - bytes_sent_total;
 	}
-	logger.debug("Connection was closed. Client_fd: " + std::to_string(client_fd));
+	std::string_view chunk(response.c_str() + bytes_sent_total, chunk_size);
+	ssize_t bytes_sent = send(client_fd, chunk.data(), chunk_size, 0);
+	logger.debug(std::to_string(bytes_sent) + " bytes sent to client_fd " + std::to_string(client_fd));
+	if (bytes_sent <= 0) {
+		_closeClientFd(client_fd, "send: error");
+	} else if (bytes_sent + bytes_sent_total == response.size()) {
+		_closeClientFd(client_fd, nullptr);
+	} else {
+		_clients_map[client_fd].bytes_sent_total += bytes_sent;
+	}
 }
 
 std::string Webserv::_getHtmlHeader( size_t content_length, size_t status_code ) {
