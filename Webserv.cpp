@@ -3,7 +3,7 @@
 Webserv Webserv::_instance;
 
 Webserv::Webserv( void ) {
-	logger.setLevel(DEBUG);
+	logger.setLevel(INFO);
 	logger.debug("Webserv instance created");
 	_keep_running = true;
 	_server_fd = -1;
@@ -134,7 +134,7 @@ void Webserv::_handleConnection( void ) {
 		return;
 	}
 	epoll_event event;
-	event.events = EPOLLIN | EPOLLET;
+	event.events = EPOLLIN;
 	event.data.fd = client_fd;
 	if (epoll_ctl(_epoll_fd, EPOLL_CTL_ADD, client_fd, &event) == -1) {
 		_closeClientFd(client_fd, "epoll_ctl: add client_fd");
@@ -153,16 +153,19 @@ void Webserv::_closeClientFd( int client_fd, const char* err_msg ) {
 }
 
 int Webserv::_getClientRequest( int client_fd ) {
-	char buffer[4096];
+	char buffer[_chunk_size];
 	Request& request = _clients_map[client_fd].request;
 	ssize_t bytes = recv(client_fd, buffer, sizeof(buffer), 0);
+	logger.debug(std::to_string(bytes) + " bytes received from client_fd " + std::to_string(client_fd));
 	if (bytes < 0) {
 		_closeClientFd(client_fd, "Recv failed");
 		return 1;
-	} else {
+	} else if (bytes > 0) {
 		request.raw.append(buffer, bytes);
 	}
-	if (request.parseRequest() == 0) {
+	if ((size_t)bytes == _chunk_size) {
+		return 2;
+	} else if (request.parseRequest() == 0) {
 		if (logger.getLevel() == DEBUG) {
 			request.printRequest();
 		}
