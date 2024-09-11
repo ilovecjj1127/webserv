@@ -3,7 +3,7 @@
 Webserv Webserv::_instance;
 
 Webserv::Webserv( void ) {
-	logger.setLevel(INFO);
+	logger.setLevel(DEBUG);
 	logger.debug("Webserv instance created");
 	_keep_running = true;
 	_server_fd = -1;
@@ -157,22 +157,24 @@ int Webserv::_getClientRequest( int client_fd ) {
 	Request& request = _clients_map[client_fd].request;
 	ssize_t bytes = recv(client_fd, buffer, sizeof(buffer), 0);
 	logger.debug(std::to_string(bytes) + " bytes received from client_fd " + std::to_string(client_fd));
-	if (bytes < 0) {
+	if (bytes <= 0) {
 		_closeClientFd(client_fd, "Recv failed");
 		return 1;
 	} else if (bytes > 0) {
 		request.raw.append(buffer, bytes);
 	}
-	if ((size_t)bytes == _chunk_size) {
-		return 2;
-	} else if (request.parseRequest() == 0) {
-		if (logger.getLevel() == DEBUG) {
-			request.printRequest();
-		}
-		return 0;
+	if (request.status == NEW && request.raw.find("\r\n\r\n") != std::string::npos) {
+		request.status = request.parseRequest();
+	} else if (request.status == FULL_HEADER) {
+		request.status = request.getRequestBody();
 	}
-	_closeClientFd(client_fd, nullptr);
-	return 1;
+	if (logger.getLevel() == DEBUG && request.status == FULL_BODY) {
+		request.printRequest();
+	}
+	if (request.status == NEW || request.status == FULL_HEADER) {
+		return 2;
+	}
+	return 0;
 }
 
 void Webserv::_modifyEpollSocketOut( int client_fd ) {

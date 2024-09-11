@@ -20,6 +20,7 @@
 struct ClientData {
 	Request		request;
 	std::string	response;
+	int			response_code;
 	size_t		bytes_sent_total;
 };
 
