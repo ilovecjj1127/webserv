@@ -3,7 +3,7 @@
 Webserv Webserv::_instance;
 
 Webserv::Webserv( void ) {
-	logger.setLevel(INFO);
+	logger.setLevel(DEBUG);
 	logger.debug("Webserv instance created");
 	_keep_running = true;
 	_server_fd = -1;
@@ -13,6 +13,7 @@ Webserv::Webserv( void ) {
 	_root_path = "./nginx_example/html";
 	_index_page = "/index.html";
 	_error_page_404 = "/404.html";
+	_envp = nullptr;
 }
 
 Webserv::~Webserv( void ) {
@@ -103,7 +104,7 @@ void Webserv::_mainLoop( void ) {
 				int client_fd = events[i].data.fd;
 				ClientData& client_data = _clients_map[client_fd];
 				if (_getClientRequest(client_fd) == 0) {
-					client_data.response = _prepareResponse(client_data.request.path);
+					_prepareResponse(client_data);
 					_modifyEpollSocketOut(client_fd);
 				}
 			} else if (events[i].events & EPOLLOUT) {
@@ -193,12 +194,97 @@ std::string Webserv::_prepareResponse( const std::string& file_path, size_t stat
 		std::string page404 = "HTTP/1.1 404 Not Found\r\nContent-Length: 13\r\n\r\n404 Not Found";
 		return page404;
 	}
+	// run cgi file
+	if (full_path.substr(full_path.size() - 3) == ".py") {
+		return (_executeCgi(full_path));
+	}
+
 	std::stringstream buffer;
 	buffer << file.rdbuf();
 	std::string response = buffer.str();
 	response = _getHtmlHeader(response.size(), status_code) + response;
 	return response;
 }
+
+char**	computeCmd( std::string path ) {
+	char** cmds = (char **)calloc(3, sizeof(char *));
+	if (!cmds) {
+		return NULL;
+	}
+	cmds[0] = strdup("python3"); //cgi path
+	if (!cmds[0]) {
+		free(cmds);
+		return NULL;
+	}
+	cmds[1] = strdup(path.c_str());
+	return (cmds);
+}
+
+void free_array(char** arr) {
+	int i = -1;
+
+	if (!arr) {
+		return ;
+	}
+	while (arr[++i]) {
+		free(arr[i]);
+	}
+	free(arr);
+}
+
+std::string Webserv::_executeCgi(std::string path) {
+	int fd[2];
+	pid_t pid;
+	int status = 0;
+
+	if (pipe(fd) == -1) {
+		logger.warning("Pipe failed.");
+		return ("");
+	}
+	pid = fork();
+	if (pid == -1) {
+		logger.warning("Fork failed.");
+		return ("");
+	} else if (pid == 0) {
+		close(fd[0]);
+		dup2(fd[1], STDOUT_FILENO);
+		close(fd[1]);
+		char** cmds = computeCmd(path);
+		_setEnvp(path);
+		execve(path.c_str(), cmds, _envp);
+		free_array(cmds);
+		exit(EXIT_FAILURE);
+	}
+	else {
+		waitpid(pid, &status, 0);
+	}
+	if (status != 0) {
+		logger.warning("Chile process failed.");
+	}
+}
+
+// https://datatracker.ietf.org/doc/html/rfc3875#autoid-16
+void Webserv::_setEnvp( std::string path ) {
+	str_map env_map;
+	env_map["AUTH_TYPE"] = "";
+	env_map["CONTENT_LENGTH"] = ;
+	env_map["CONTENT_TYPE"] = "";
+	env_map["GATEWAY_INTERFACE"] = "CGI/1.1";
+	env_map["PATH_INFO"] = path;
+	env_map["PATH_TRANSLATED"] = "";
+	env_map["QUERY_STRING"] = "";
+	env_map["REMOTE_ADDR"] = "";
+	env_map["REMOTE_HOST"] = "";
+	env_map["REMOTE_IDENT"] = "";
+	env_map["REMOTE_USER"] = "";
+	env_map["REQUEST_METHOD"] = "";
+	env_map["SCRIPT_NAME"] = "";
+	env_map["SERVER_NAME"] = "";
+	env_map["SERVER_PORT"] = "";
+	env_map["SERVER_PROTOCOL"] = "";
+	env_map["SERVER_SOFTWARE"] = "";
+}
+
 
 void Webserv::_sendResponse( int client_fd ) {
 	std::string& response = _clients_map[client_fd].response;

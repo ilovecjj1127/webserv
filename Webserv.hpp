@@ -10,6 +10,7 @@
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <netinet/in.h>
 #include <unistd.h>
 
@@ -37,6 +38,7 @@ private:
 	std::string _index_page;
 	std::string _error_page_404;
 	std::unordered_map<int, ClientData> _clients_map;
+	char** _envp;
 
 	void _stopServer( void );
 	int _initServer( void );
@@ -50,6 +52,10 @@ private:
 	void _sendResponse( int client_fd );
 	std::string _prepareResponse( const std::string& file_path, size_t status_code = 200 );
 	int _getClientRequest( int client_fd );
+
+	std::string _executeCgi( std::string path );
+	void _setEnvp( std::string path );
+	
 
 public:
 	Webserv( const Webserv& ) = delete;
