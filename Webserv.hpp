@@ -6,6 +6,7 @@
 #include <string_view>
 #include <cstring>
 #include <csignal>
+#include <ctime>
 #include <fcntl.h>
 #include <unordered_map>
 #include <sys/epoll.h>
@@ -22,6 +23,7 @@ struct ClientData {
 	std::string	response;
 	int			response_code;
 	size_t		bytes_sent_total;
+	time_t		last_activity;
 };
 
 class Webserv {
@@ -41,12 +43,15 @@ private:
 	std::string _error_page_404;
 	std::unordered_map<int, ClientData> _clients_map;
 	size_t _chunk_size;
+	int _timeout_period;
 
 	void _stopServer( void );
 	int _initServer( void );
 	int _initError( const char* err_msg );
 	int _setNonBlocking( int fd );
 	void _mainLoop( void );
+	void _checkTimeouts( void );
+	void _handleEvent( epoll_event& event );
 	void _closeClientFd( int client_fd, const char* err_msg );
 	std::string _getHtmlHeader( size_t content_length, size_t status_code );
 	void _handleConnection( void );

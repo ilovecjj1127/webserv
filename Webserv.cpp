@@ -14,6 +14,8 @@ Webserv::Webserv( void ) {
 	_index_page = "/index.html";
 	_error_page_404 = "/404.html";
 	_chunk_size = 4096;
+	_timeout_period = 5;
+
 }
 
 Webserv::~Webserv( void ) {
@@ -91,25 +93,18 @@ int Webserv::_setNonBlocking( int fd ) {
 
 void Webserv::_mainLoop( void ) {
 	epoll_event events[_event_array_size];
+	time_t last_timeout_check = time(nullptr);
 	while (_keep_running) {
-		int n = epoll_wait(_epoll_fd, events, _event_array_size, -1);
+		int n = epoll_wait(_epoll_fd, events, _event_array_size, _timeout_period * 1000);
 		if ( n == -1) {
 			if (_keep_running) perror("epoll_wait");
 			break;
+		} else if (difftime(time(nullptr), last_timeout_check) > _timeout_period) {
+			_checkTimeouts();
+			last_timeout_check = time(nullptr);
 		}
 		for (int i = 0; i < n; ++i) {
-			if (events[i].data.fd == _server_fd) {
-				_handleConnection();
-			} else if (events[i].events & EPOLLIN) {
-				int client_fd = events[i].data.fd;
-				ClientData& client_data = _clients_map[client_fd];
-				if (_getClientRequest(client_fd) == 0) {
-					client_data.response = _prepareResponse(client_data.request.path);
-					_modifyEpollSocketOut(client_fd);
-				}
-			} else if (events[i].events & EPOLLOUT) {
-				_sendResponse(events[i].data.fd);
-			}
+			_handleEvent(events[i]);
 		}
 	}
 	for (const auto &client_pair : _clients_map) {
@@ -117,6 +112,34 @@ void Webserv::_mainLoop( void ) {
 	}
 	close(_epoll_fd);
 	if (!_keep_running) logger.info("Interrupted by signal");
+}
+
+void Webserv::_handleEvent( epoll_event& event ) {
+	if (event.data.fd == _server_fd) {
+		_handleConnection();
+	} else if (event.events & EPOLLIN) {
+		int client_fd = event.data.fd;
+		ClientData& client_data = _clients_map[client_fd];
+		if (_getClientRequest(client_fd) == 0) {
+			client_data.response = _prepareResponse(client_data.request.path);
+			_modifyEpollSocketOut(client_fd);
+		}
+	} else if (event.events & EPOLLOUT) {
+		_sendResponse(event.data.fd);
+	}
+}
+
+void Webserv::_checkTimeouts( void ) {
+	time_t now = time(nullptr);
+	for (auto it = _clients_map.begin(); it != _clients_map.end();) {
+		int client_fd = it->first;
+		time_t last_activity = it->second.last_activity;
+		++it;
+		if (difftime(now, last_activity) > _timeout_period) {
+			logger.debug("Timeout for client_fd " + std::to_string(client_fd));
+			_closeClientFd(client_fd, nullptr);
+		}
+	}
 }
 
 void Webserv::_handleConnection( void ) {
@@ -127,7 +150,7 @@ void Webserv::_handleConnection( void ) {
 		perror("Failed to accept connection");
 		return;
 	} else {
-		_clients_map[client_fd];
+		_clients_map[client_fd].last_activity = time(nullptr);
 	}
 	if (_setNonBlocking(client_fd) == -1) {
 		_closeClientFd(client_fd, "Failed to set non-blocking mode: client_fd");
@@ -171,6 +194,7 @@ int Webserv::_getClientRequest( int client_fd ) {
 	if (logger.getLevel() == DEBUG && request.status == FULL_BODY) {
 		request.printRequest();
 	}
+	_clients_map[client_fd].last_activity = time(nullptr);
 	if (request.status == NEW || request.status == FULL_HEADER) {
 		return 2;
 	}
@@ -227,6 +251,7 @@ void Webserv::_sendResponse( int client_fd ) {
 		_closeClientFd(client_fd, nullptr);
 	} else {
 		_clients_map[client_fd].bytes_sent_total += bytes_sent;
+		_clients_map[client_fd].last_activity = time(nullptr);
 	}
 }
 
