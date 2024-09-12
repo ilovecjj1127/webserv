@@ -14,14 +14,6 @@ except Exception as e:
 
 storage = cgi.FieldStorage()
 
-head = '''Content-Type: text/html
-
-<html><body>
-<h1>Python CGI "File Exchange"</h1>
-'''
-
-tail = "</body></html>"
-
 upload_form = '''<br><h2>Upload file</h2>
 <form method='POST' action='/cgi/file_exchange_cgi.py' enctype='multipart/form-data'>
 <label for='file'>Choose a file:</label><br><br>
@@ -58,12 +50,13 @@ def file_with_delete_button(filename: str) -> str:
 		   "</form></li>"
 	return line
 
+body = '<html><body>\n<h1>Python CGI "File Exchange"</h1>'
 method = os.environ.get("REQUEST_METHOD", "")
 if method == "GET":
 	if not files:
-		body = "<p>No files here yet</p>"
+		body += "<p>No files here yet</p>"
 	else:
-		body = "<h2>File list:</h2>\n<ul>"
+		body += "<h2>File list:</h2>\n<ul>"
 		for file in files:
 			body += file_with_delete_button(file)
 		body += "</ul>"
@@ -73,13 +66,13 @@ if method == "GET":
 	body += f"<script>\n{js_script}</script>"
 elif method == "POST":
 	file_object = storage["file"]
-	body = create_file(file_object)
+	body += create_file(file_object)
 elif method == "DELETE":
 	filename = storage.getvalue("filename")
-	body = delete_file(filename)
+	body += delete_file(filename)
 else:
-	body = f"<h2>Unknown method: {method}</h2>"
+	body += f"<h2>Unknown method: {method}</h2>"
+body += "</body></html>"
 
-print(head)
-print(body)
-print(tail)
+response = f"HTTP/1.1 200 OK\nContent-Type: text/html\nContent-Length: {len(body)}\n\n{body}"
+print(response)
