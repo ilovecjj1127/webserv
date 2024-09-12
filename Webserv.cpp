@@ -13,7 +13,6 @@ Webserv::Webserv( void ) {
 	_root_path = "./nginx_example/html";
 	_index_page = "/index.html";
 	_error_page_404 = "/404.html";
-	_envp = nullptr;
 }
 
 Webserv::~Webserv( void ) {
@@ -104,7 +103,7 @@ void Webserv::_mainLoop( void ) {
 				int client_fd = events[i].data.fd;
 				ClientData& client_data = _clients_map[client_fd];
 				if (_getClientRequest(client_fd) == 0) {
-					_prepareResponse(client_data);
+					client_data.response = _prepareResponse(client_data.request, client_data.request.path);
 					_modifyEpollSocketOut(client_fd);
 				}
 			} else if (events[i].events & EPOLLOUT) {
@@ -180,25 +179,27 @@ void Webserv::_modifyEpollSocketOut( int client_fd ) {
 	}
 }
 
-std::string Webserv::_prepareResponse( const std::string& file_path, size_t status_code ) {
+std::string Webserv::_prepareResponse( const Request& req, const std::string& file_path, size_t status_code ) {
 	if (file_path == "/" && file_path != _index_page) {
-		return _prepareResponse(_index_page, 200);
+		return _prepareResponse(req, _index_page, 200);
+	}
+	if (file_path.substr(file_path.size() - 3) == ".py") {
+		std::string cgi_file = "./nginx_example" + file_path;
+		logger.info("CGI file: " + cgi_file);
+		if (access(cgi_file.c_str(), F_OK) == 0) {
+		 	return (_executeCgi(req, cgi_file));
+		}
 	}
 	std::string full_path = _root_path + file_path;
 	std::ifstream file(full_path);
 	if (!file.is_open() && file_path != _error_page_404) {
 		logger.warning("Failed to open file: " + full_path);
-		return _prepareResponse(_error_page_404, 404);
+		return _prepareResponse(req, _error_page_404, 404);
 	} else if (!file.is_open()) {
 		logger.warning("Failed to open file: " + full_path);
 		std::string page404 = "HTTP/1.1 404 Not Found\r\nContent-Length: 13\r\n\r\n404 Not Found";
 		return page404;
 	}
-	// run cgi file
-	if (full_path.substr(full_path.size() - 3) == ".py") {
-		return (_executeCgi(full_path));
-	}
-
 	std::stringstream buffer;
 	buffer << file.rdbuf();
 	std::string response = buffer.str();
@@ -232,7 +233,7 @@ void free_array(char** arr) {
 	free(arr);
 }
 
-std::string Webserv::_executeCgi(std::string path) {
+std::string Webserv::_executeCgi( const Request& req, std::string& path ) {
 	int fd[2];
 	pid_t pid;
 	int status = 0;
@@ -250,39 +251,82 @@ std::string Webserv::_executeCgi(std::string path) {
 		dup2(fd[1], STDOUT_FILENO);
 		close(fd[1]);
 		char** cmds = computeCmd(path);
-		_setEnvp(path);
-		execve(path.c_str(), cmds, _envp);
+		char** envp = _createEnvp(req, path);
+		execve("/usr/bin/python3", cmds, envp);
 		free_array(cmds);
+		free_array(envp);
 		exit(EXIT_FAILURE);
 	}
 	else {
 		waitpid(pid, &status, 0);
 	}
-	if (status != 0) {
-		logger.warning("Chile process failed.");
+	close(fd[1]);
+	if (!WIFEXITED(status)) {
+		logger.warning("Child process failed.");
+		return ("");
 	}
+	std::string response;
+	ssize_t bytesread;
+	char buffer[1024];
+	while ((bytesread = read(fd[0], buffer, sizeof(buffer)))) {
+		response.append(buffer);
+	}
+	if (bytesread < 0) {
+		logger.warning("read from pipe failed.");
+	}
+	logger.info("CGI response: " + response);
+	std::cout << response.size() << std::endl;
+	return response;
 }
 
 // https://datatracker.ietf.org/doc/html/rfc3875#autoid-16
-void Webserv::_setEnvp( std::string path ) {
-	str_map env_map;
-	env_map["AUTH_TYPE"] = "";
-	env_map["CONTENT_LENGTH"] = ;
-	env_map["CONTENT_TYPE"] = "";
-	env_map["GATEWAY_INTERFACE"] = "CGI/1.1";
+	// str_map env_map;
+	// env_map["AUTH_TYPE"] = "";
+	// env_map["GATEWAY_INTERFACE"] = "CGI/1.1";
+	// env_map["PATH_TRANSLATED"] = "";
+	// env_map["REMOTE_ADDR"] = "";
+	// env_map["REMOTE_HOST"] = "";
+	// env_map["REMOTE_IDENT"] = "";
+	// env_map["REMOTE_USER"] = "";
+	// env_map["SCRIPT_NAME"] = "";
+	// env_map["SERVER_PROTOCOL"] = "";
+	// env_map["SERVER_SOFTWARE"] = "";
+char** Webserv::_createEnvp( const Request& req, std::string& path ) {
+	str_map env_map(req.headers);
+	// path
 	env_map["PATH_INFO"] = path;
-	env_map["PATH_TRANSLATED"] = "";
-	env_map["QUERY_STRING"] = "";
-	env_map["REMOTE_ADDR"] = "";
-	env_map["REMOTE_HOST"] = "";
-	env_map["REMOTE_IDENT"] = "";
-	env_map["REMOTE_USER"] = "";
-	env_map["REQUEST_METHOD"] = "";
-	env_map["SCRIPT_NAME"] = "";
-	env_map["SERVER_NAME"] = "";
-	env_map["SERVER_PORT"] = "";
-	env_map["SERVER_PROTOCOL"] = "";
-	env_map["SERVER_SOFTWARE"] = "";
+	// body
+	// env_map["CONTENT_LENGTH"] = std::to_string(req.body.size());
+	// env_map["CONTENT_TYPE"] = "";
+	// params
+	for (auto it = req.params.begin(); it != req.params.end(); ++it) {
+		env_map["QUERY_STRING"] += it->first;
+		env_map["QUERY_STRING"] += "=";
+		env_map["QUERY_STRING"] += it->second;
+		if (it != req.params.end()) {
+			env_map["QUERY_STRING"] += "&";
+		}
+	}
+	// methods
+	std::unordered_map<Method, std::string> methods_map = {
+		{GET, "GET"},
+		{POST, "POST"},
+		{DELETE, "DELETE"}
+	};
+	env_map["REQUEST_METHOD"] = methods_map[req.method];
+	env_map["SERVER_PORT"] = std::to_string(_listen_port);
+	
+	char** envp;
+	std::string temp_str;
+	envp = (char **)calloc(env_map.size() + 1, sizeof(char *));
+	int i = 0;
+	for (const auto& it : env_map) {
+		temp_str = it.first + "=" + it.second;
+		envp[i] = strdup(temp_str.c_str());
+		i++;
+	}
+	envp[i] = NULL;
+	return (envp);
 }
 
 

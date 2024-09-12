@@ -38,7 +38,6 @@ private:
 	std::string _index_page;
 	std::string _error_page_404;
 	std::unordered_map<int, ClientData> _clients_map;
-	char** _envp;
 
 	void _stopServer( void );
 	int _initServer( void );
@@ -50,11 +49,11 @@ private:
 	void _handleConnection( void );
 	void _modifyEpollSocketOut( int client_fd );
 	void _sendResponse( int client_fd );
-	std::string _prepareResponse( const std::string& file_path, size_t status_code = 200 );
+	std::string _prepareResponse( const Request& req, const std::string& file_path, size_t status_code = 200 );
 	int _getClientRequest( int client_fd );
 
-	std::string _executeCgi( std::string path );
-	void _setEnvp( std::string path );
+	std::string _executeCgi( const Request& req, std::string& path );
+	char** _createEnvp( const Request& req, std::string& path );
 	
 
 public:
