@@ -3,6 +3,7 @@
 #include <iostream>
 #include <fstream>
 #include <string>
+#include <string_view>
 #include <cstring>
 #include <csignal>
 #include <fcntl.h>
@@ -19,6 +20,8 @@
 struct ClientData {
 	Request		request;
 	std::string	response;
+	int			response_code;
+	size_t		bytes_sent_total;
 };
 
 class Webserv {
@@ -37,6 +40,7 @@ private:
 	std::string _index_page;
 	std::string _error_page_404;
 	std::unordered_map<int, ClientData> _clients_map;
+	size_t _chunk_size;
 
 	void _stopServer( void );
 	int _initServer( void );

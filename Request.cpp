@@ -6,6 +6,11 @@ const std::unordered_map<std::string, Method> Request::methods = {
 	{"DELETE", DELETE}
 };
 
+Request::Request( void ) {
+	method = UNDEFINED;
+	status = NEW;
+}
+
 Request::Request( const Request& other ) {
 	*this = other;
 }
@@ -18,23 +23,23 @@ Request& Request::operator = ( const Request& other ) {
 		params = other.params;
 		headers = other.headers;;
 		body = other.body;
+		status = other.status;
+		content_length = other.content_length;
 	}
 	return (*this);
 }
 
-int Request::parseRequest( void ) {
+RqStatus Request::parseRequest( void ) {
 	std::istringstream request_stream(raw);
 	std::string line;
 	std::getline(request_stream, line);
 	if (_parseRequestLine(line) != 0) {
-		return 1;
-	} else if (request_stream.eof()) {
-		return 0;
+		return INVALID;
 	}
 	while(std::getline(request_stream, line) && line != "\r") {
 		size_t delimiter = line.find(": ");
 		if (delimiter == std::string::npos) {
-			return 1;
+			return INVALID;
 		} else if (!line.empty() && line.back() == '\r') {
 			line.pop_back();
 		}
@@ -43,12 +48,27 @@ int Request::parseRequest( void ) {
 		headers[key] = value;		
 	}
 	if (request_stream) {
-		std::getline(request_stream, body, '\0');
+		std::getline(request_stream, raw, '\0');
+	}
+	try {
+		content_length = std::stoull(headers["Content-Length"]);
+	} catch (...) {
+		content_length = 0;
 	}
 	if (request_stream.eof()) {
-		return 0;
+		return getRequestBody();
 	}
-	return 1;
+	return INVALID;
+}
+
+RqStatus Request::getRequestBody( void ) {
+	if (raw.size() == content_length) {
+		body = raw;
+		return FULL_BODY;
+	} else if (raw.size() < content_length) {
+		return FULL_HEADER;
+	}
+	return INVALID;
 }
 
 int Request::_parseRequestLine( const std::string& line ) {
