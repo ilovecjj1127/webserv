@@ -104,6 +104,7 @@ void Webserv::_mainLoop( void ) {
 				ClientData& client_data = _clients_map[client_fd];
 				if (_getClientRequest(client_fd) == 0) {
 					client_data.response = _prepareResponse(client_data.request, client_data.request.path);
+					logger.info(client_data.response);
 					_modifyEpollSocketOut(client_fd);
 				}
 			} else if (events[i].events & EPOLLOUT) {
@@ -212,7 +213,7 @@ char**	computeCmd( std::string path ) {
 	if (!cmds) {
 		return NULL;
 	}
-	cmds[0] = strdup("python3"); //cgi path
+	cmds[0] = strdup("python3");
 	if (!cmds[0]) {
 		free(cmds);
 		return NULL;
@@ -234,22 +235,27 @@ void free_array(char** arr) {
 }
 
 std::string Webserv::_executeCgi( const Request& req, std::string& path ) {
-	int fd[2];
-	pid_t pid;
+	int fd_res[2], fd_body[2];
 	int status = 0;
+	pid_t pid;
+	ssize_t bytesread;
+	std::string response;
+	char buffer[1024] = {};
 
-	if (pipe(fd) == -1) {
+	if (pipe(fd_res) == -1 || pipe(fd_body) == -1) {
 		logger.warning("Pipe failed.");
 		return ("");
 	}
-	pid = fork();
-	if (pid == -1) {
+	if ((pid = fork()) == -1) {
 		logger.warning("Fork failed.");
 		return ("");
 	} else if (pid == 0) {
-		close(fd[0]);
-		dup2(fd[1], STDOUT_FILENO);
-		close(fd[1]);
+		close(fd_res[0]);
+		close(fd_body[1]);
+		dup2(fd_body[0], STDIN_FILENO);
+		dup2(fd_res[1], STDOUT_FILENO);
+		close(fd_res[1]);
+		close(fd_res[1]);
 		char** cmds = computeCmd(path);
 		char** envp = _createEnvp(req, path);
 		execve("/usr/bin/python3", cmds, envp);
@@ -258,46 +264,35 @@ std::string Webserv::_executeCgi( const Request& req, std::string& path ) {
 		exit(EXIT_FAILURE);
 	}
 	else {
+		close(fd_body[0]);
+		if (req.method == POST) {
+			write(fd_body[1], req.body.data(), req.body.size());
+		}
+		close(fd_body[1]);
 		waitpid(pid, &status, 0);
 	}
-	close(fd[1]);
+	close(fd_res[1]);
 	if (!WIFEXITED(status)) {
 		logger.warning("Child process failed.");
 		return ("");
 	}
-	std::string response;
-	ssize_t bytesread;
-	char buffer[1024];
-	while ((bytesread = read(fd[0], buffer, sizeof(buffer)))) {
+	while ((bytesread = read(fd_res[0], buffer, sizeof(buffer)))) {
 		response.append(buffer);
 	}
 	if (bytesread < 0) {
 		logger.warning("read from pipe failed.");
 	}
-	logger.info("CGI response: " + response);
-	std::cout << response.size() << std::endl;
+	// logger.info("CGI response: " + response);
+	// std::cout << response.size() << std::endl;
 	return response;
 }
 
 // https://datatracker.ietf.org/doc/html/rfc3875#autoid-16
-	// str_map env_map;
-	// env_map["AUTH_TYPE"] = "";
-	// env_map["GATEWAY_INTERFACE"] = "CGI/1.1";
-	// env_map["PATH_TRANSLATED"] = "";
-	// env_map["REMOTE_ADDR"] = "";
-	// env_map["REMOTE_HOST"] = "";
-	// env_map["REMOTE_IDENT"] = "";
-	// env_map["REMOTE_USER"] = "";
-	// env_map["SCRIPT_NAME"] = "";
-	// env_map["SERVER_PROTOCOL"] = "";
-	// env_map["SERVER_SOFTWARE"] = "";
 char** Webserv::_createEnvp( const Request& req, std::string& path ) {
+	(void)path;
 	str_map env_map(req.headers);
 	// path
-	env_map["PATH_INFO"] = path;
-	// body
-	// env_map["CONTENT_LENGTH"] = std::to_string(req.body.size());
-	// env_map["CONTENT_TYPE"] = "";
+	env_map["PATH_INFO"] = req.path;
 	// params
 	for (auto it = req.params.begin(); it != req.params.end(); ++it) {
 		env_map["QUERY_STRING"] += it->first;
