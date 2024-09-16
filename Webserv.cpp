@@ -13,6 +13,7 @@ Webserv::Webserv( void ) {
 	_root_path = "./nginx_example/html";
 	_index_page = "/index.html";
 	_error_page_404 = "/404.html";
+	_chunk_size = 4096;
 }
 
 Webserv::~Webserv( void ) {
@@ -134,7 +135,7 @@ void Webserv::_handleConnection( void ) {
 		return;
 	}
 	epoll_event event;
-	event.events = EPOLLIN | EPOLLET;
+	event.events = EPOLLIN;
 	event.data.fd = client_fd;
 	if (epoll_ctl(_epoll_fd, EPOLL_CTL_ADD, client_fd, &event) == -1) {
 		_closeClientFd(client_fd, "epoll_ctl: add client_fd");
@@ -149,31 +150,37 @@ void Webserv::_closeClientFd( int client_fd, const char* err_msg ) {
 	if (err_msg != nullptr) {
 		perror(err_msg);
 	}
+	logger.debug("Connection was closed. Client_fd: " + std::to_string(client_fd));
 }
 
 int Webserv::_getClientRequest( int client_fd ) {
-	char buffer[4096];
+	char buffer[_chunk_size];
 	Request& request = _clients_map[client_fd].request;
 	ssize_t bytes = recv(client_fd, buffer, sizeof(buffer), 0);
-	if (bytes < 0) {
+	logger.debug(std::to_string(bytes) + " bytes received from client_fd " + std::to_string(client_fd));
+	if (bytes <= 0) {
 		_closeClientFd(client_fd, "Recv failed");
 		return 1;
-	} else {
+	} else if (bytes > 0) {
 		request.raw.append(buffer, bytes);
 	}
-	if (request.parseRequest() == 0) {
-		if (logger.getLevel() == DEBUG) {
-			request.printRequest();
-		}
-		return 0;
+	if (request.status == NEW && request.raw.find("\r\n\r\n") != std::string::npos) {
+		request.status = request.parseRequest();
+	} else if (request.status == FULL_HEADER) {
+		request.status = request.getRequestBody();
 	}
-	_closeClientFd(client_fd, nullptr);
-	return 1;
+	if (logger.getLevel() == DEBUG && request.status == FULL_BODY) {
+		request.printRequest();
+	}
+	if (request.status == NEW || request.status == FULL_HEADER) {
+		return 2;
+	}
+	return 0;
 }
 
 void Webserv::_modifyEpollSocketOut( int client_fd ) {
 	epoll_event event;
-	event.events = EPOLLOUT | EPOLLET;
+	event.events = EPOLLOUT;
 	event.data.fd = client_fd;
 	if (epoll_ctl(_epoll_fd, EPOLL_CTL_MOD, client_fd, &event) == -1) {
 		_closeClientFd(client_fd, "epoll_ctl: mod client_fd");
@@ -255,7 +262,7 @@ std::string Webserv::_executeCgi( const Request& req, std::string& path ) {
 		dup2(fd_body[0], STDIN_FILENO);
 		dup2(fd_res[1], STDOUT_FILENO);
 		close(fd_res[1]);
-		close(fd_res[1]);
+		close(fd_body[0]);
 		char** cmds = computeCmd(path);
 		char** envp = _createEnvp(req, path);
 		execve("/usr/bin/python3", cmds, envp);
@@ -316,7 +323,9 @@ char** Webserv::_createEnvp( const Request& req, std::string& path ) {
 	envp = (char **)calloc(env_map.size() + 1, sizeof(char *));
 	int i = 0;
 	for (const auto& it : env_map) {
-		temp_str = it.first + "=" + it.second;
+		temp_str = "";
+		for (auto& c: it.first) temp_str += toupper(c);
+		temp_str +=  ("=" + it.second);
 		envp[i] = strdup(temp_str.c_str());
 		i++;
 	}
@@ -327,13 +336,25 @@ char** Webserv::_createEnvp( const Request& req, std::string& path ) {
 
 void Webserv::_sendResponse( int client_fd ) {
 	std::string& response = _clients_map[client_fd].response;
-	ssize_t bytes_sent = send(client_fd, response.c_str(), response.size(), 0);
-	if (bytes_sent == -1) {
-		_closeClientFd(client_fd, "send: error");
-	} else {
+	size_t bytes_sent_total = _clients_map[client_fd].bytes_sent_total;
+	std::size_t chunk_size = _chunk_size;
+	if (response.size() == bytes_sent_total) {
+		logger.debug("Nothing to send");
 		_closeClientFd(client_fd, nullptr);
+		return;
+	} else if (response.size() - bytes_sent_total < _chunk_size) {
+		chunk_size = response.size() - bytes_sent_total;
 	}
-	logger.debug("Connection was closed. Client_fd: " + std::to_string(client_fd));
+	std::string_view chunk(response.c_str() + bytes_sent_total, chunk_size);
+	ssize_t bytes_sent = send(client_fd, chunk.data(), chunk_size, 0);
+	logger.debug(std::to_string(bytes_sent) + " bytes sent to client_fd " + std::to_string(client_fd));
+	if (bytes_sent <= 0) {
+		_closeClientFd(client_fd, "send: error");
+	} else if (bytes_sent + bytes_sent_total == response.size()) {
+		_closeClientFd(client_fd, nullptr);
+	} else {
+		_clients_map[client_fd].bytes_sent_total += bytes_sent;
+	}
 }
 
 std::string Webserv::_getHtmlHeader( size_t content_length, size_t status_code ) {

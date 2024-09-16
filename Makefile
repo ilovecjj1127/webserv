@@ -6,7 +6,7 @@ SOURCES = main.cpp Webserv.cpp Logger.cpp Request.cpp
 
 OBJECTS = $(addprefix $(OBJ_DIR)/, $(SOURCES:.cpp=.o))
 
-CFLAGS += -Wall -Wextra -Werror
+CFLAGS += -Wall -Wextra -Werror -std=c++20
 
 all: $(NAME)
 
