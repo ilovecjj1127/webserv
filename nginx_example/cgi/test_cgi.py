@@ -19,6 +19,7 @@ for key, value in params.items():
 	body += f"<p>{key} = {value}</p>"
 body += "</body></html>"
 
-response = f"HTTP/1.1 200 OK\nContent-Type: text/html\nContent-Length: {len(body)}\n\n{body}"
+response = "Status: 200 OK\r\nContent-Type: text/html\r\n" \
+		   f"Content-Length: {len(body)}\r\n\r\n{body}"
 
 print(response)
