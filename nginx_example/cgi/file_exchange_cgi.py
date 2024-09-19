@@ -3,10 +3,22 @@
 import os
 import cgi
 import cgitb
+import logging
+import sys
+
+
+logging.basicConfig(
+	# filename="/usr/share/nginx/media/out.log",
+	filename="./nginx_example/media/out.log",
+	format='%(asctime)s - %(levelname)s: %(message)s',
+	level=logging.DEBUG
+)
+
 
 cgitb.enable()
 
-dir = "/usr/share/nginx/media"
+# dir = "/usr/share/nginx/media"
+dir = "./nginx_example/media"
 try:
 	files = os.listdir(dir)
 except Exception as e:
@@ -61,7 +73,8 @@ if method == "GET":
 			body += file_with_delete_button(file)
 		body += "</ul>"
 	body += upload_form
-	with open("/usr/share/nginx/cgi/deleteFileForm.js", "r") as js_file:
+	# with open("/usr/share/nginx/cgi/deleteFileForm.js", "r") as js_file:
+	with open("./nginx_example/cgi/deleteFileForm.js", "r") as js_file:
 		js_script = js_file.read()
 	body += f"<script>\n{js_script}</script>"
 elif method == "POST":
@@ -74,5 +87,5 @@ else:
 	body += f"<h2>Unknown method: {method}</h2>"
 body += "</body></html>"
 
-response = f"HTTP/1.1 200 OK\nContent-Type: text/html\nContent-Length: {len(body)}\n\n{body}"
+response = f"Status: 200 OK\nContent-Type: text/html\nContent-Length: {len(body)}\n\n{body}"
 print(response)

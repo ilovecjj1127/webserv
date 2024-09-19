@@ -147,6 +147,7 @@ void Webserv::_handlePipes( epoll_event& event ) {
 		logger.info("body size: " + std::to_string(request.body.size()) + " bytes write: " + std::to_string(bytes));
 	}
 	close(event.data.fd);
+	_pipe_map.erase(event.data.fd);
 }
 
 void Webserv::_handleConnection( void ) {
@@ -302,7 +303,7 @@ void Webserv::_executeCgi( int client_fd, std::string& path ) {
 	}
 	close(fd_body[0]);
 	close(fd_res[1]);
-	if (req.method == POST) {
+	if (req.method == POST || req.method == DELETE) {
 		epoll_event event;
 		event.events = EPOLLOUT;
 		event.data.fd = fd_body[1];
@@ -334,7 +335,7 @@ char** Webserv::_createEnvp( const Request& req, std::string& path ) {
 	// env_map["SERVER_PORT"] = std::to_string(_listen_port);
 	env_map["SERVER_PROTOCOL"] = "HTTP/1.1";
 	env_map["GATEWAY_INTERFACE"] = "CGI/1.1";
-	env_map["CONTENT_TYPE"] = "application/x-www-form-urlencoded";
+	// env_map["CONTENT_TYPE"] = "application/x-www-form-urlencoded";
 	// params
 	for (auto it = req.params.begin(); it != req.params.end(); ++it) {
 		env_map["QUERY_STRING"] += it->first;
@@ -359,7 +360,13 @@ char** Webserv::_createEnvp( const Request& req, std::string& path ) {
 	int i = 0;
 	for (const auto& it : env_map) {
 		temp_str = "";
-		for (auto& c: it.first) temp_str += toupper(c);
+		for (auto& c: it.first) {
+			if (c == '-') {
+				temp_str += '_';
+			} else {
+				temp_str += toupper(c);
+			}
+		}
 		temp_str +=  ("=" + it.second);
 		envp[i] = strdup(temp_str.c_str());
 		i++;
