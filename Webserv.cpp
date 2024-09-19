@@ -100,13 +100,17 @@ void Webserv::_mainLoop( void ) {
 		for (int i = 0; i < n; ++i) {
 			if (events[i].data.fd == _server_fd) {
 				_handleConnection();
+			} else if (_clients_map.find(events[i].data.fd) == _clients_map.end()) {
+				_handlePipes(events[i]);
 			} else if (events[i].events & EPOLLIN) {
 				int client_fd = events[i].data.fd;
 				ClientData& client_data = _clients_map[client_fd];
 				if (_getClientRequest(client_fd) == 0) {
-					client_data.response = _prepareResponse(client_data.request.path);
-					_modifyEpollSocketOut(client_fd);
-				}
+					if (_prepareResponse(client_fd, client_data.request.path)) {
+						logger.info("static page");
+						logger.info(client_data.response);
+						_modifyEpollSocketOut(client_fd);
+					}
 			} else if (events[i].events & EPOLLOUT) {
 				_sendResponse(events[i].data.fd);
 			}
@@ -117,6 +121,50 @@ void Webserv::_mainLoop( void ) {
 	}
 	close(_epoll_fd);
 	if (!_keep_running) logger.info("Interrupted by signal");
+}
+
+void Webserv::_handlePipes( epoll_event& event ) {
+	int client_fd = _pipe_map[event.data.fd];
+	std::string& response = _clients_map[client_fd].response;
+	Request& request = _clients_map[client_fd].request;
+	size_t bytes_write_total = _clients_map[client_fd].bytes_write_total;
+	size_t bytes;
+
+	if (event.events & EPOLLIN) {
+		char buffer[_chunk_size];
+		bytes = read(event.data.fd, buffer, sizeof(buffer));
+		logger.info("bytes read from pipe: " + std::to_string(bytes));
+		if (bytes < 0) {
+			logger.warning("read from pipe failed.");
+		} else if (bytes > 0) {
+			response.append(buffer, bytes);
+		} 
+		if (bytes < _chunk_size) {
+			size_t pos = response.find("Status:");
+			if (pos != std::string::npos) {
+				response.replace(pos, 7, "HTTP/1.1");
+			}
+			logger.info(response);
+			_modifyEpollSocketOut(client_fd);
+			close(event.data.fd);
+			_pipe_map.erase(event.data.fd);
+		}
+	}
+	if (event.events & EPOLLOUT) {
+		if (bytes_write_total == request.body.size()) {
+			close(event.data.fd);
+			_pipe_map.erase(event.data.fd);
+			return;
+		}
+		std::string_view chunk(request.body.c_str() + bytes_write_total);
+		size_t chunk_size = _chunk_size;
+		if (request.body.size() - bytes_write_total < _chunk_size) {
+			chunk_size = chunk.size();
+		}
+		bytes = write(event.data.fd, chunk.data(), chunk_size);
+		_clients_map[client_fd].bytes_write_total += bytes;
+		logger.info("body size: " + std::to_string(request.body.size()) + " bytes write: " + std::to_string(bytes));
+	}
 }
 
 void Webserv::_handleConnection( void ) {
@@ -186,26 +234,158 @@ void Webserv::_modifyEpollSocketOut( int client_fd ) {
 	}
 }
 
-std::string Webserv::_prepareResponse( const std::string& file_path, size_t status_code ) {
+int Webserv::_prepareResponse( int client_fd, const std::string& file_path, size_t status_code ) {
+	std::string& response = _clients_map[client_fd].response;
+
 	if (file_path == "/" && file_path != _index_page) {
-		return _prepareResponse(_index_page, 200);
+		return _prepareResponse(client_fd, _index_page, 200);
+	}
+	if (file_path.substr(file_path.size() - 3) == ".py") {
+		std::string cgi_file = "./nginx_example" + file_path;
+		logger.info("CGI file: " + cgi_file);
+		if (access(cgi_file.c_str(), F_OK) == 0) {
+		 	_executeCgi(client_fd, cgi_file);
+		}
+		return 0;
 	}
 	std::string full_path = _root_path + file_path;
 	std::ifstream file(full_path);
 	if (!file.is_open() && file_path != _error_page_404) {
 		logger.warning("Failed to open file: " + full_path);
-		return _prepareResponse(_error_page_404, 404);
+		return _prepareResponse(client_fd, _error_page_404, 404);
 	} else if (!file.is_open()) {
 		logger.warning("Failed to open file: " + full_path);
 		std::string page404 = "HTTP/1.1 404 Not Found\r\nContent-Length: 13\r\n\r\n404 Not Found";
-		return page404;
+		response = page404;
+		return 1;
 	}
 	std::stringstream buffer;
 	buffer << file.rdbuf();
-	std::string response = buffer.str();
+	response = buffer.str();
 	response = _getHtmlHeader(response.size(), status_code) + response;
-	return response;
+	return 1;
 }
+
+char**	computeCmd( std::string path ) {
+	char** cmds = (char **)calloc(3, sizeof(char *));
+	if (!cmds) {
+		return NULL;
+	}
+	cmds[0] = strdup("python3");
+	if (!cmds[0]) {
+		free(cmds);
+		return NULL;
+	}
+	cmds[1] = strdup(path.c_str());
+	return (cmds);
+}
+
+void free_array(char** arr) {
+	int i = -1;
+
+	if (!arr) {
+		return ;
+	}
+	while (arr[++i]) {
+		free(arr[i]);
+	}
+	free(arr);
+}
+
+void Webserv::_executeCgi( int client_fd, std::string& path ) {
+	int fd_res[2], fd_body[2];
+	pid_t pid;
+	Request& req = _clients_map[client_fd].request;
+
+	if (pipe(fd_res) == -1 || pipe(fd_body) == -1) {
+		logger.warning("Pipe failed.");
+		return;
+	}
+	if ((pid = fork()) == -1) {
+		logger.warning("Fork failed.");
+		return;
+	} else if (pid == 0) {
+		close(fd_res[0]);
+		close(fd_body[1]);
+		dup2(fd_body[0], STDIN_FILENO);
+		dup2(fd_res[1], STDOUT_FILENO);
+		close(fd_res[1]);
+		close(fd_body[0]);
+		char** cmds = computeCmd(path);
+		char** envp = _createEnvp(req, path);
+		execve("/usr/bin/python3", cmds, envp);
+		free_array(cmds);
+		free_array(envp);
+		exit(EXIT_FAILURE);
+	}
+	close(fd_body[0]);
+	close(fd_res[1]);
+	if (req.method == POST || req.method == DELETE) {
+		epoll_event event;
+		event.events = EPOLLOUT;
+		event.data.fd = fd_body[1];
+		if (epoll_ctl(_epoll_fd, EPOLL_CTL_ADD, fd_body[1], &event) == -1) {
+			_initError("Failed to add read pipe to epoll");
+			return;
+		}
+		_pipe_map[fd_body[1]] = client_fd;
+	} else {
+		close(fd_body[1]);
+	}
+	epoll_event event;
+	event.events = EPOLLIN;
+	event.data.fd = fd_res[0];
+	if (epoll_ctl(_epoll_fd, EPOLL_CTL_ADD, fd_res[0], &event) == -1) {
+		_initError("Failed to add read pipe to epoll");
+		return;
+	}
+	_pipe_map[fd_res[0]] = client_fd;
+}
+
+// https://datatracker.ietf.org/doc/html/rfc3875#autoid-16
+char** Webserv::_createEnvp( const Request& req, std::string& path ) {
+	(void)path;
+	str_map env_map(req.headers);
+	env_map["PATH_INFO"] = req.path;
+	env_map["SERVER_PROTOCOL"] = "HTTP/1.1";
+	env_map["GATEWAY_INTERFACE"] = "CGI/1.1";
+	for (auto it = req.params.begin(); it != req.params.end(); ++it) {
+		env_map["QUERY_STRING"] += it->first;
+		env_map["QUERY_STRING"] += "=";
+		env_map["QUERY_STRING"] += it->second;
+		if (it != req.params.end()) {
+			env_map["QUERY_STRING"] += "&";
+		}
+	}
+	std::unordered_map<Method, std::string> methods_map = {
+		{GET, "GET"},
+		{POST, "POST"},
+		{DELETE, "DELETE"}
+	};
+	env_map["REQUEST_METHOD"] = methods_map[req.method];
+	env_map["SERVER_PORT"] = std::to_string(_listen_port);
+	
+	char** envp;
+	std::string temp_str;
+	envp = (char **)calloc(env_map.size() + 1, sizeof(char *));
+	int i = 0;
+	for (const auto& it : env_map) {
+		temp_str = "";
+		for (auto& c: it.first) {
+			if (c == '-') {
+				temp_str += '_';
+			} else {
+				temp_str += toupper(c);
+			}
+		}
+		temp_str +=  ("=" + it.second);
+		envp[i] = strdup(temp_str.c_str());
+		i++;
+	}
+	envp[i] = NULL;
+	return (envp);
+}
+
 
 void Webserv::_sendResponse( int client_fd ) {
 	std::string& response = _clients_map[client_fd].response;
