@@ -111,7 +111,6 @@ void Webserv::_mainLoop( void ) {
 						logger.info(client_data.response);
 						_modifyEpollSocketOut(client_fd);
 					}
-				}
 			} else if (events[i].events & EPOLLOUT) {
 				_sendResponse(events[i].data.fd);
 			}
@@ -347,14 +346,9 @@ void Webserv::_executeCgi( int client_fd, std::string& path ) {
 char** Webserv::_createEnvp( const Request& req, std::string& path ) {
 	(void)path;
 	str_map env_map(req.headers);
-	// path
 	env_map["PATH_INFO"] = req.path;
-	// env_map["SCRIPT_NAME"] = "/ngnix_example/cgi/upload_cgi.py";
-	// env_map["SERVER_PORT"] = std::to_string(_listen_port);
 	env_map["SERVER_PROTOCOL"] = "HTTP/1.1";
 	env_map["GATEWAY_INTERFACE"] = "CGI/1.1";
-	// env_map["CONTENT_TYPE"] = "application/x-www-form-urlencoded";
-	// params
 	for (auto it = req.params.begin(); it != req.params.end(); ++it) {
 		env_map["QUERY_STRING"] += it->first;
 		env_map["QUERY_STRING"] += "=";
@@ -363,7 +357,6 @@ char** Webserv::_createEnvp( const Request& req, std::string& path ) {
 			env_map["QUERY_STRING"] += "&";
 		}
 	}
-	// methods
 	std::unordered_map<Method, std::string> methods_map = {
 		{GET, "GET"},
 		{POST, "POST"},
