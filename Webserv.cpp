@@ -128,25 +128,44 @@ void Webserv::_handlePipes( epoll_event& event ) {
 	int client_fd = _pipe_map[event.data.fd];
 	std::string& response = _clients_map[client_fd].response;
 	Request& request = _clients_map[client_fd].request;
+	size_t bytes_write_total = _clients_map[client_fd].bytes_write_total;
 	size_t bytes;
 
 	if (event.events & EPOLLIN) {
-		char buffer[1024] = {};
-		while ((bytes = read(event.data.fd, buffer, sizeof(buffer)))) {
-			response.append(buffer);
-			logger.info("bytes read: " + std::to_string(bytes));
-		}
+		char buffer[_chunk_size];
+		bytes = read(event.data.fd, buffer, sizeof(buffer));
+		logger.info("bytes read from pipe: " + std::to_string(bytes));
 		if (bytes < 0) {
 			logger.warning("read from pipe failed.");
+		} else if (bytes > 0) {
+			response.append(buffer, bytes);
+		} 
+		if (bytes < _chunk_size) {
+			size_t pos = response.find("Status:");
+			if (pos != std::string::npos) {
+				response.replace(pos, 7, "HTTP/1.1");
+			}
+			logger.info(response);
+			_modifyEpollSocketOut(client_fd);
+			close(event.data.fd);
+			_pipe_map.erase(event.data.fd);
 		}
-		logger.info(response);
-		_modifyEpollSocketOut(client_fd);
 	}
 	if (event.events & EPOLLOUT) {
-		bytes = write(event.data.fd, request.body.data(), request.body.size());
+		if (bytes_write_total == request.body.size()) {
+			close(event.data.fd);
+			_pipe_map.erase(event.data.fd);
+			return;
+		}
+		std::string_view chunk(request.body.c_str() + bytes_write_total);
+		size_t chunk_size = _chunk_size;
+		if (request.body.size() - bytes_write_total < _chunk_size) {
+			chunk_size = chunk.size();
+		}
+		bytes = write(event.data.fd, chunk.data(), chunk_size);
+		_clients_map[client_fd].bytes_write_total += bytes;
 		logger.info("body size: " + std::to_string(request.body.size()) + " bytes write: " + std::to_string(bytes));
 	}
-	close(event.data.fd);
 }
 
 void Webserv::_handleConnection( void ) {
@@ -302,7 +321,7 @@ void Webserv::_executeCgi( int client_fd, std::string& path ) {
 	}
 	close(fd_body[0]);
 	close(fd_res[1]);
-	if (req.method == POST) {
+	if (req.method == POST || req.method == DELETE) {
 		epoll_event event;
 		event.events = EPOLLOUT;
 		event.data.fd = fd_body[1];
@@ -334,7 +353,7 @@ char** Webserv::_createEnvp( const Request& req, std::string& path ) {
 	// env_map["SERVER_PORT"] = std::to_string(_listen_port);
 	env_map["SERVER_PROTOCOL"] = "HTTP/1.1";
 	env_map["GATEWAY_INTERFACE"] = "CGI/1.1";
-	env_map["CONTENT_TYPE"] = "application/x-www-form-urlencoded";
+	// env_map["CONTENT_TYPE"] = "application/x-www-form-urlencoded";
 	// params
 	for (auto it = req.params.begin(); it != req.params.end(); ++it) {
 		env_map["QUERY_STRING"] += it->first;
@@ -359,7 +378,13 @@ char** Webserv::_createEnvp( const Request& req, std::string& path ) {
 	int i = 0;
 	for (const auto& it : env_map) {
 		temp_str = "";
-		for (auto& c: it.first) temp_str += toupper(c);
+		for (auto& c: it.first) {
+			if (c == '-') {
+				temp_str += '_';
+			} else {
+				temp_str += toupper(c);
+			}
+		}
 		temp_str +=  ("=" + it.second);
 		envp[i] = strdup(temp_str.c_str());
 		i++;

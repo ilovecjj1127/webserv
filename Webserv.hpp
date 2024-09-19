@@ -24,6 +24,7 @@ struct ClientData {
 	std::string	response;
 	int			response_code;
 	size_t		bytes_sent_total;
+	size_t		bytes_write_total;
 };
 
 class Webserv {
