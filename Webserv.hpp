@@ -14,6 +14,7 @@
 #include <sys/wait.h>
 #include <netinet/in.h>
 #include <unistd.h>
+#include <vector>
 
 #include "Logger.hpp"
 #include "Request.hpp"
@@ -41,6 +42,7 @@ private:
 	std::string _index_page;
 	std::string _error_page_404;
 	std::unordered_map<int, ClientData> _clients_map;
+	std::unordered_map<int, int> _pipe_map;
 	size_t _chunk_size;
 
 	void _stopServer( void );
@@ -53,12 +55,12 @@ private:
 	void _handleConnection( void );
 	void _modifyEpollSocketOut( int client_fd );
 	void _sendResponse( int client_fd );
-	std::string _prepareResponse( const Request& req, const std::string& file_path, size_t status_code = 200 );
+	int _prepareResponse( int client_fd, const std::string& file_path, size_t status_code = 200 );
 	int _getClientRequest( int client_fd );
 
-	std::string _executeCgi( const Request& req, std::string& path );
+	void _executeCgi( int client_fd, std::string& path );
 	char** _createEnvp( const Request& req, std::string& path );
-	
+	void _handlePipes( epoll_event& event );
 
 public:
 	Webserv( const Webserv& ) = delete;

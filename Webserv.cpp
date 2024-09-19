@@ -100,13 +100,17 @@ void Webserv::_mainLoop( void ) {
 		for (int i = 0; i < n; ++i) {
 			if (events[i].data.fd == _server_fd) {
 				_handleConnection();
+			} else if (_clients_map.find(events[i].data.fd) == _clients_map.end()) {
+				_handlePipes(events[i]);
 			} else if (events[i].events & EPOLLIN) {
 				int client_fd = events[i].data.fd;
 				ClientData& client_data = _clients_map[client_fd];
 				if (_getClientRequest(client_fd) == 0) {
-					client_data.response = _prepareResponse(client_data.request, client_data.request.path);
-					logger.info(client_data.response);
-					_modifyEpollSocketOut(client_fd);
+					if (_prepareResponse(client_fd, client_data.request.path)) {
+						logger.info("static page");
+						logger.info(client_data.response);
+						_modifyEpollSocketOut(client_fd);
+					}
 				}
 			} else if (events[i].events & EPOLLOUT) {
 				_sendResponse(events[i].data.fd);
@@ -118,6 +122,31 @@ void Webserv::_mainLoop( void ) {
 	}
 	close(_epoll_fd);
 	if (!_keep_running) logger.info("Interrupted by signal");
+}
+
+void Webserv::_handlePipes( epoll_event& event ) {
+	int client_fd = _pipe_map[event.data.fd];
+	std::string& response = _clients_map[client_fd].response;
+	Request& request = _clients_map[client_fd].request;
+	size_t bytes;
+
+	if (event.events & EPOLLIN) {
+		char buffer[1024] = {};
+		while ((bytes = read(event.data.fd, buffer, sizeof(buffer)))) {
+			response.append(buffer);
+			logger.info("bytes read: " + std::to_string(bytes));
+		}
+		if (bytes < 0) {
+			logger.warning("read from pipe failed.");
+		}
+		logger.info(response);
+		_modifyEpollSocketOut(client_fd);
+	}
+	if (event.events & EPOLLOUT) {
+		bytes = write(event.data.fd, request.body.data(), request.body.size());
+		logger.info("body size: " + std::to_string(request.body.size()) + " bytes write: " + std::to_string(bytes));
+	}
+	close(event.data.fd);
 }
 
 void Webserv::_handleConnection( void ) {
@@ -187,32 +216,36 @@ void Webserv::_modifyEpollSocketOut( int client_fd ) {
 	}
 }
 
-std::string Webserv::_prepareResponse( const Request& req, const std::string& file_path, size_t status_code ) {
+int Webserv::_prepareResponse( int client_fd, const std::string& file_path, size_t status_code ) {
+	std::string& response = _clients_map[client_fd].response;
+
 	if (file_path == "/" && file_path != _index_page) {
-		return _prepareResponse(req, _index_page, 200);
+		return _prepareResponse(client_fd, _index_page, 200);
 	}
 	if (file_path.substr(file_path.size() - 3) == ".py") {
 		std::string cgi_file = "./nginx_example" + file_path;
 		logger.info("CGI file: " + cgi_file);
 		if (access(cgi_file.c_str(), F_OK) == 0) {
-		 	return (_executeCgi(req, cgi_file));
+		 	_executeCgi(client_fd, cgi_file);
 		}
+		return 0;
 	}
 	std::string full_path = _root_path + file_path;
 	std::ifstream file(full_path);
 	if (!file.is_open() && file_path != _error_page_404) {
 		logger.warning("Failed to open file: " + full_path);
-		return _prepareResponse(req, _error_page_404, 404);
+		return _prepareResponse(client_fd, _error_page_404, 404);
 	} else if (!file.is_open()) {
 		logger.warning("Failed to open file: " + full_path);
 		std::string page404 = "HTTP/1.1 404 Not Found\r\nContent-Length: 13\r\n\r\n404 Not Found";
-		return page404;
+		response = page404;
+		return 1;
 	}
 	std::stringstream buffer;
 	buffer << file.rdbuf();
-	std::string response = buffer.str();
+	response = buffer.str();
 	response = _getHtmlHeader(response.size(), status_code) + response;
-	return response;
+	return 1;
 }
 
 char**	computeCmd( std::string path ) {
@@ -241,21 +274,18 @@ void free_array(char** arr) {
 	free(arr);
 }
 
-std::string Webserv::_executeCgi( const Request& req, std::string& path ) {
+void Webserv::_executeCgi( int client_fd, std::string& path ) {
 	int fd_res[2], fd_body[2];
-	int status = 0;
 	pid_t pid;
-	ssize_t bytesread;
-	std::string response;
-	char buffer[1024] = {};
+	Request& req = _clients_map[client_fd].request;
 
 	if (pipe(fd_res) == -1 || pipe(fd_body) == -1) {
 		logger.warning("Pipe failed.");
-		return ("");
+		return;
 	}
 	if ((pid = fork()) == -1) {
 		logger.warning("Fork failed.");
-		return ("");
+		return;
 	} else if (pid == 0) {
 		close(fd_res[0]);
 		close(fd_body[1]);
@@ -270,28 +300,28 @@ std::string Webserv::_executeCgi( const Request& req, std::string& path ) {
 		free_array(envp);
 		exit(EXIT_FAILURE);
 	}
-	else {
-		close(fd_body[0]);
-		if (req.method == POST) {
-			write(fd_body[1], req.body.data(), req.body.size());
-		}
-		close(fd_body[1]);
-		waitpid(pid, &status, 0);
-	}
+	close(fd_body[0]);
 	close(fd_res[1]);
-	if (!WIFEXITED(status)) {
-		logger.warning("Child process failed.");
-		return ("");
+	if (req.method == POST) {
+		epoll_event event;
+		event.events = EPOLLOUT;
+		event.data.fd = fd_body[1];
+		if (epoll_ctl(_epoll_fd, EPOLL_CTL_ADD, fd_body[1], &event) == -1) {
+			_initError("Failed to add read pipe to epoll");
+			return;
+		}
+		_pipe_map[fd_body[1]] = client_fd;
+	} else {
+		close(fd_body[1]);
 	}
-	while ((bytesread = read(fd_res[0], buffer, sizeof(buffer)))) {
-		response.append(buffer);
+	epoll_event event;
+	event.events = EPOLLIN;
+	event.data.fd = fd_res[0];
+	if (epoll_ctl(_epoll_fd, EPOLL_CTL_ADD, fd_res[0], &event) == -1) {
+		_initError("Failed to add read pipe to epoll");
+		return;
 	}
-	if (bytesread < 0) {
-		logger.warning("read from pipe failed.");
-	}
-	// logger.info("CGI response: " + response);
-	// std::cout << response.size() << std::endl;
-	return response;
+	_pipe_map[fd_res[0]] = client_fd;
 }
 
 // https://datatracker.ietf.org/doc/html/rfc3875#autoid-16
@@ -300,6 +330,11 @@ char** Webserv::_createEnvp( const Request& req, std::string& path ) {
 	str_map env_map(req.headers);
 	// path
 	env_map["PATH_INFO"] = req.path;
+	// env_map["SCRIPT_NAME"] = "/ngnix_example/cgi/upload_cgi.py";
+	// env_map["SERVER_PORT"] = std::to_string(_listen_port);
+	env_map["SERVER_PROTOCOL"] = "HTTP/1.1";
+	env_map["GATEWAY_INTERFACE"] = "CGI/1.1";
+	env_map["CONTENT_TYPE"] = "application/x-www-form-urlencoded";
 	// params
 	for (auto it = req.params.begin(); it != req.params.end(); ++it) {
 		env_map["QUERY_STRING"] += it->first;
