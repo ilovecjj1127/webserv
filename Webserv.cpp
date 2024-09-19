@@ -111,6 +111,7 @@ void Webserv::_mainLoop( void ) {
 						logger.info(client_data.response);
 						_modifyEpollSocketOut(client_fd);
 					}
+				}
 			} else if (events[i].events & EPOLLOUT) {
 				_sendResponse(events[i].data.fd);
 			}

@@ -81,8 +81,8 @@ class Response:
 
 class Cgi:
 	def __init__(self):
-		self.uploads_dir = "/usr/share/nginx/media"
-		self.delete_js_filepath = "/usr/share/nginx/cgi/deleteFileForm.js"
+		self.uploads_dir = "./nginx_example/media"
+		self.delete_js_filepath = "./nginx_example/cgi/deleteFileForm.js"
 		self.storage = cgi.FieldStorage()
 		self.components = CgiComponents()
 
