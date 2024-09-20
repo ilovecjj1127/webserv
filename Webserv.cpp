@@ -131,7 +131,7 @@ void Webserv::_handlePipes( epoll_event& event ) {
 	size_t bytes_write_total = _clients_map[client_fd].bytes_write_total;
 	size_t bytes;
 
-	if (event.events & EPOLLIN) {
+	if ((event.events & EPOLLIN) || (event.events & EPOLLHUP)) {
 		char buffer[_chunk_size];
 		bytes = read(event.data.fd, buffer, sizeof(buffer));
 		logger.info("bytes read from pipe: " + std::to_string(bytes));
@@ -140,7 +140,7 @@ void Webserv::_handlePipes( epoll_event& event ) {
 		} else if (bytes > 0) {
 			response.append(buffer, bytes);
 		} 
-		if (bytes < _chunk_size) {
+		if (bytes == 0) {
 			size_t pos = response.find("Status:");
 			if (pos != std::string::npos) {
 				response.replace(pos, 7, "HTTP/1.1");
@@ -157,14 +157,14 @@ void Webserv::_handlePipes( epoll_event& event ) {
 			_pipe_map.erase(event.data.fd);
 			return;
 		}
-		std::string_view chunk(request.body.c_str() + bytes_write_total);
 		size_t chunk_size = _chunk_size;
 		if (request.body.size() - bytes_write_total < _chunk_size) {
-			chunk_size = chunk.size();
+			chunk_size = request.body.size() - bytes_write_total;
 		}
+		std::string_view chunk(request.body.c_str() + bytes_write_total, chunk_size);
 		bytes = write(event.data.fd, chunk.data(), chunk_size);
 		_clients_map[client_fd].bytes_write_total += bytes;
-		logger.info("body size: " + std::to_string(request.body.size()) + " bytes write: " + std::to_string(bytes));
+		logger.info("bytes_write total: " + std::to_string(_clients_map[client_fd].bytes_write_total) + " body size: " + std::to_string(request.body.size()) + " bytes write: " + std::to_string(bytes));
 	}
 }
 
@@ -321,6 +321,8 @@ void Webserv::_executeCgi( int client_fd, std::string& path ) {
 	}
 	close(fd_body[0]);
 	close(fd_res[1]);
+	_setNonBlocking(fd_body[1]);
+	_setNonBlocking(fd_res[0]);
 	if (req.method == POST || req.method == DELETE) {
 		epoll_event event;
 		event.events = EPOLLOUT;
@@ -334,7 +336,7 @@ void Webserv::_executeCgi( int client_fd, std::string& path ) {
 		close(fd_body[1]);
 	}
 	epoll_event event;
-	event.events = EPOLLIN;
+	event.events = EPOLLIN | EPOLLHUP;
 	event.data.fd = fd_res[0];
 	if (epoll_ctl(_epoll_fd, EPOLL_CTL_ADD, fd_res[0], &event) == -1) {
 		_initError("Failed to add read pipe to epoll");
