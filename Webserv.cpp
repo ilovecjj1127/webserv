@@ -140,7 +140,8 @@ void Webserv::_checkTimeouts( void ) {
 		int client_fd = it->first;
 		time_t last_activity = it->second.last_activity;
 		++it;
-		if (difftime(now, last_activity) > _timeout_period) {
+		if (difftime(now, last_activity) > _timeout_period &&
+			_clients_map[client_fd].cgi.pid == 0) {
 			logger.debug("Timeout for client_fd " + std::to_string(client_fd));
 			_closeClientFd(client_fd, nullptr);
 		}
@@ -270,7 +271,7 @@ int Webserv::_prepareResponse( int client_fd, const std::string& file_path, size
 		logger.info("CGI file: " + cgi_file);
 		if (access(cgi_file.c_str(), F_OK) == 0) {
 		 	_executeCgi(client_fd, cgi_file);
-		}
+		} // Need to add "else"
 		return 0;
 	}
 	std::string full_path = _root_path + file_path;
@@ -343,6 +344,9 @@ void Webserv::_executeCgi( int client_fd, std::string& path ) {
 		free_array(envp);
 		exit(EXIT_FAILURE);
 	}
+	CgiData& cgi = _clients_map[client_fd].cgi;
+	cgi.pid = pid;
+	cgi.client_fd = client_fd;
 	close(fd_body[0]);
 	close(fd_res[1]);
 	_setNonBlocking(fd_body[1]);
@@ -356,6 +360,7 @@ void Webserv::_executeCgi( int client_fd, std::string& path ) {
 			return;
 		}
 		_pipe_map[fd_body[1]] = client_fd;
+		cgi.fd_in = fd_body[1];
 	} else {
 		close(fd_body[1]);
 	}
@@ -367,6 +372,7 @@ void Webserv::_executeCgi( int client_fd, std::string& path ) {
 		return;
 	}
 	_pipe_map[fd_res[0]] = client_fd;
+	cgi.fd_out = fd_res[0];
 }
 
 // https://datatracker.ietf.org/doc/html/rfc3875#autoid-16

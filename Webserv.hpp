@@ -20,13 +20,22 @@
 #include "Logger.hpp"
 #include "Request.hpp"
 
+
+struct CgiData {
+	pid_t	pid = 0;
+	int		client_fd = 0;
+	int		fd_in = 0;
+	int		fd_out = 0;
+}
+
 struct ClientData {
 	Request		request;
 	std::string	response;
 	int			response_code;
-	size_t		bytes_sent_total;
-	size_t		bytes_write_total;
+	size_t		bytes_sent_total = 0;
+	size_t		bytes_write_total = 0;
 	time_t		last_activity;
+	CgiData		cgi;
 };
 
 class Webserv {
