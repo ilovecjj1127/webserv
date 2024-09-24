@@ -160,7 +160,9 @@ void Webserv::_handlePipes( epoll_event& event ) {
 		bytes = read(event.data.fd, buffer, sizeof(buffer));
 		logger.info("bytes read from pipe: " + std::to_string(bytes));
 		if (bytes < 0) {
-			logger.warning("read from pipe failed.");
+			response = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 36\r\n\r\nError: Failed to read from CGI pipe.";
+			_modifyEpollSocketOut(client_fd);
+			return _closePipe(event.data.fd, "read pipe: ");
 		} else if (bytes > 0) {
 			response.append(buffer, bytes);
 		} 
@@ -171,15 +173,12 @@ void Webserv::_handlePipes( epoll_event& event ) {
 			}
 			logger.info(response);
 			_modifyEpollSocketOut(client_fd);
-			close(event.data.fd);
-			_pipe_map.erase(event.data.fd);
+			_closePipe(event.data.fd, nullptr);
 		}
 	}
 	if (event.events & EPOLLOUT) {
 		if (bytes_write_total == request.body.size()) {
-			close(event.data.fd);
-			_pipe_map.erase(event.data.fd);
-			return;
+			return _closePipe(event.data.fd, nullptr);
 		}
 		size_t chunk_size = _chunk_size;
 		if (request.body.size() - bytes_write_total < _chunk_size) {
@@ -187,9 +186,21 @@ void Webserv::_handlePipes( epoll_event& event ) {
 		}
 		std::string_view chunk(request.body.c_str() + bytes_write_total, chunk_size);
 		bytes = write(event.data.fd, chunk.data(), chunk_size);
+		if (bytes < 0) {
+			return _closePipe(event.data.fd, "write pipe: ");
+		}
 		_clients_map[client_fd].bytes_write_total += bytes;
 		logger.info("bytes_write total: " + std::to_string(_clients_map[client_fd].bytes_write_total) + " body size: " + std::to_string(request.body.size()) + " bytes write: " + std::to_string(bytes));
 	}
+}
+
+void Webserv::_closePipe( int pipe_fd, const char* err_msg ) {
+	close(pipe_fd);
+	_pipe_map.erase(pipe_fd);
+	if (err_msg != nullptr) {
+		perror(err_msg);
+	}
+	logger.debug("Pipe was closed. Pipe: " + std::to_string(pipe_fd));
 }
 
 void Webserv::_handleConnection( void ) {
