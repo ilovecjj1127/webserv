@@ -14,6 +14,8 @@ Webserv::Webserv( void ) {
 	_index_page = "/index.html";
 	_error_page_404 = "/404.html";
 	_chunk_size = 4096;
+	_timeout_period = 5;
+
 }
 
 Webserv::~Webserv( void ) {
@@ -91,30 +93,19 @@ int Webserv::_setNonBlocking( int fd ) {
 
 void Webserv::_mainLoop( void ) {
 	epoll_event events[_event_array_size];
+	time_t last_timeout_check = time(nullptr);
 	while (_keep_running) {
-		int n = epoll_wait(_epoll_fd, events, _event_array_size, -1);
+		int n = epoll_wait(_epoll_fd, events, _event_array_size, _timeout_period * 1000);
+		// logger.debug("Epoll got events: " + std::to_string(n));
 		if ( n == -1) {
 			if (_keep_running) perror("epoll_wait");
 			break;
+		} else if (difftime(time(nullptr), last_timeout_check) >= _timeout_period) {
+			_checkTimeouts();
+			last_timeout_check = time(nullptr);
 		}
 		for (int i = 0; i < n; ++i) {
-			if (events[i].data.fd == _server_fd) {
-				_handleConnection();
-			} else if (_clients_map.find(events[i].data.fd) == _clients_map.end()) {
-				_handlePipes(events[i]);
-			} else if (events[i].events & EPOLLIN) {
-				int client_fd = events[i].data.fd;
-				ClientData& client_data = _clients_map[client_fd];
-				if (_getClientRequest(client_fd) == 0) {
-					if (_prepareResponse(client_fd, client_data.request.path)) {
-						logger.info("static page");
-						logger.info(client_data.response);
-						_modifyEpollSocketOut(client_fd);
-					}
-				}
-			} else if (events[i].events & EPOLLOUT) {
-				_sendResponse(events[i].data.fd);
-			}
+			_handleEvent(events[i]);
 		}
 	}
 	for (const auto &client_pair : _clients_map) {
@@ -124,59 +115,120 @@ void Webserv::_mainLoop( void ) {
 	if (!_keep_running) logger.info("Interrupted by signal");
 }
 
-void Webserv::_handlePipes( epoll_event& event ) {
-	int client_fd = _pipe_map[event.data.fd];
-	std::string& response = _clients_map[client_fd].response;
-	Request& request = _clients_map[client_fd].request;
-	size_t bytes_write_total = _clients_map[client_fd].bytes_write_total;
-	size_t bytes;
-
-	if ((event.events & EPOLLIN) || (event.events & EPOLLHUP)) {
-		char buffer[_chunk_size];
-		bytes = read(event.data.fd, buffer, sizeof(buffer));
-		logger.info("bytes read from pipe: " + std::to_string(bytes));
-		if (bytes < 0) {
-			response = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 36\r\n\r\nError: Failed to read from CGI pipe.";
-			_modifyEpollSocketOut(client_fd);
-			return _closePipe(event.data.fd, "read pipe: ");
-		} else if (bytes > 0) {
-			response.append(buffer, bytes);
-		} 
-		if (bytes == 0) {
-			size_t pos = response.find("Status:");
-			if (pos != std::string::npos) {
-				response.replace(pos, 7, "HTTP/1.1");
+void Webserv::_handleEvent( epoll_event& event ) {
+	if (event.data.fd == _server_fd) {
+		_handleConnection();
+	} else if (_pipe_map.find(event.data.fd) != _pipe_map.end()) {
+		if (event.events & EPOLLOUT) {
+			_sendCgiRequest(event.data.fd);
+		} else if ((event.events & EPOLLIN) || (event.events & EPOLLHUP)) {
+			_getCgiResponse(event.data.fd);
+		}
+	} else if (_clients_map.find(event.data.fd) == _clients_map.end()) {
+		return;
+	} else if (event.events & EPOLLIN) {
+		int client_fd = event.data.fd;
+		ClientData& client_data = _clients_map[client_fd];
+		if (_getClientRequest(client_fd) == 0) {
+			if (_prepareResponse(client_fd, client_data.request.path)) {
+				logger.debug("static page");
+				logger.debug(client_data.response);
+				_modifyEpollSocketOut(client_fd);
 			}
-			logger.info(response);
-			_modifyEpollSocketOut(client_fd);
-			_closePipe(event.data.fd, nullptr);
 		}
-	}
-	if (event.events & EPOLLOUT) {
-		if (bytes_write_total == request.body.size()) {
-			return _closePipe(event.data.fd, nullptr);
-		}
-		size_t chunk_size = _chunk_size;
-		if (request.body.size() - bytes_write_total < _chunk_size) {
-			chunk_size = request.body.size() - bytes_write_total;
-		}
-		std::string_view chunk(request.body.c_str() + bytes_write_total, chunk_size);
-		bytes = write(event.data.fd, chunk.data(), chunk_size);
-		if (bytes < 0) {
-			return _closePipe(event.data.fd, "write pipe: ");
-		}
-		_clients_map[client_fd].bytes_write_total += bytes;
-		logger.info("bytes_write total: " + std::to_string(_clients_map[client_fd].bytes_write_total) + " body size: " + std::to_string(request.body.size()) + " bytes write: " + std::to_string(bytes));
+	} else if (event.events & EPOLLOUT) {
+		_sendClientResponse(event.data.fd);
 	}
 }
 
-void Webserv::_closePipe( int pipe_fd, const char* err_msg ) {
+void Webserv::_checkTimeouts( void ) {
+	time_t now = time(nullptr);
+	for (auto it = _clients_map.begin(); it != _clients_map.end();) {
+		int client_fd = it->first;
+		ClientData& client_data = it->second;
+		++it;
+		if (difftime(now, client_data.last_activity) >= _timeout_period) {
+			if (client_data.cgi.pid == 0) {
+				logger.debug("Timeout for client_fd " + std::to_string(client_fd));
+				_closeClientFd(client_fd, nullptr);
+			} else {
+				logger.debug("CGI timeout for client_fd " + std::to_string(client_fd));
+				client_data.last_activity = time(nullptr);
+				client_data.response = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 25\r\n\r\n500 Internal Server Error";
+				_modifyEpollSocketOut(client_fd);
+				return _closeCgiPipe(client_data.cgi.fd_in, client_data.cgi, nullptr);
+			}
+		}
+	}
+}
+
+void Webserv::_sendCgiRequest( int fd_out ) {
+	int client_fd = _pipe_map[fd_out];
+	ClientData& client_data = _clients_map[client_fd];
+	Request& request = client_data.request;
+	size_t bytes_write_total = client_data.bytes_write_total;
+	if (bytes_write_total == request.body.size()) {
+		return _closeCgiPipe(fd_out, client_data.cgi, nullptr);
+	}
+	size_t chunk_size = _chunk_size;
+	if (request.body.size() - bytes_write_total < _chunk_size) {
+		chunk_size = request.body.size() - bytes_write_total;
+	}
+	std::string_view chunk(request.body.c_str() + bytes_write_total, chunk_size);
+	size_t bytes = write(fd_out, chunk.data(), chunk_size);
+	client_data.last_activity = time(nullptr);
+	if (bytes < 0) {
+		client_data.response = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 25\r\n\r\n500 Internal Server Error";
+		_modifyEpollSocketOut(client_fd);
+		return _closeCgiPipe(client_data.cgi.fd_in, client_data.cgi, "write pipe: ");
+	}
+	_clients_map[client_fd].bytes_write_total += bytes;
+	logger.debug("Body size: " + std::to_string(request.body.size()) + " bytes write: " + std::to_string(bytes));
+}
+
+void Webserv::_getCgiResponse( int fd_in ) {
+	int client_fd = _pipe_map[fd_in];
+	ClientData& client_data = _clients_map[client_fd];
+	std::string& response = client_data.response;
+	char buffer[_chunk_size];
+	size_t bytes = read(fd_in, buffer, sizeof(buffer));
+	client_data.last_activity = time(nullptr);
+	logger.info("bytes read from pipe: " + std::to_string(bytes));
+	if (bytes > 0) {
+		response = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 25\r\n\r\n500 Internal Server Error";
+		_modifyEpollSocketOut(client_fd);
+		return _closeCgiPipe(fd_in, client_data.cgi, "read pipe: ");
+	} else if (bytes > 0) {
+		response.append(buffer, bytes);
+	}
+	if (bytes == 0) {
+		size_t pos = response.find("Status:"); // Need to add first line even if no status in response
+		if (pos != std::string::npos) {
+			response.replace(pos, 7, "HTTP/1.1");
+		}
+		logger.info(response);
+		_modifyEpollSocketOut(client_fd);
+		_closeCgiPipe(fd_in, client_data.cgi, nullptr);
+	}
+}
+
+void Webserv::_closeCgiPipe( int pipe_fd, CgiData& cgi, const char* err_msg ) {
 	close(pipe_fd);
 	_pipe_map.erase(pipe_fd);
 	if (err_msg != nullptr) {
 		perror(err_msg);
 	}
 	logger.debug("Pipe was closed. Pipe: " + std::to_string(pipe_fd));
+	if (pipe_fd == cgi.fd_out) {
+		cgi.fd_out = 0;
+	} else {
+		cgi.fd_in = 0;
+		if (cgi.fd_out != 0) {
+			_closeCgiPipe(cgi.fd_out, cgi, nullptr);
+		}
+		kill(cgi.pid, SIGKILL);
+		cgi.pid = 0;
+	}
 }
 
 void Webserv::_handleConnection( void ) {
@@ -187,7 +239,7 @@ void Webserv::_handleConnection( void ) {
 		perror("Failed to accept connection");
 		return;
 	} else {
-		_clients_map[client_fd];
+		_clients_map[client_fd].last_activity = time(nullptr);
 	}
 	if (_setNonBlocking(client_fd) == -1) {
 		_closeClientFd(client_fd, "Failed to set non-blocking mode: client_fd");
@@ -231,6 +283,7 @@ int Webserv::_getClientRequest( int client_fd ) {
 	if (logger.getLevel() == DEBUG && request.status == FULL_BODY) {
 		request.printRequest();
 	}
+	_clients_map[client_fd].last_activity = time(nullptr);
 	if (request.status == NEW || request.status == FULL_HEADER) {
 		return 2;
 	}
@@ -248,7 +301,6 @@ void Webserv::_modifyEpollSocketOut( int client_fd ) {
 
 int Webserv::_prepareResponse( int client_fd, const std::string& file_path, size_t status_code ) {
 	std::string& response = _clients_map[client_fd].response;
-
 	if (file_path == "/" && file_path != _index_page) {
 		return _prepareResponse(client_fd, _index_page, 200);
 	}
@@ -257,7 +309,7 @@ int Webserv::_prepareResponse( int client_fd, const std::string& file_path, size
 		logger.info("CGI file: " + cgi_file);
 		if (access(cgi_file.c_str(), F_OK) == 0) {
 		 	_executeCgi(client_fd, cgi_file);
-		}
+		} // Need to add "else"
 		return 0;
 	}
 	std::string full_path = _root_path + file_path;
@@ -306,15 +358,15 @@ void free_array(char** arr) {
 
 void Webserv::_executeCgi( int client_fd, std::string& path ) {
 	int fd_res[2], fd_body[2];
-	pid_t pid;
-	Request& req = _clients_map[client_fd].request;
-
 	if (pipe(fd_res) == -1 || pipe(fd_body) == -1) {
 		logger.warning("Pipe failed.");
+		// Need to reply to the client. If first pipe was successful we need to close it
 		return;
 	}
-	if ((pid = fork()) == -1) {
+	pid_t pid = fork();
+	if (pid == -1) {
 		logger.warning("Fork failed.");
+		// Need to close pipes and to reply to the client
 		return;
 	} else if (pid == 0) {
 		close(fd_res[0]);
@@ -324,36 +376,50 @@ void Webserv::_executeCgi( int client_fd, std::string& path ) {
 		close(fd_res[1]);
 		close(fd_body[0]);
 		char** cmds = computeCmd(path);
-		char** envp = _createEnvp(req, path);
+		char** envp = _createEnvp(_clients_map[client_fd].request, path);
 		execve("/usr/bin/python3", cmds, envp);
 		free_array(cmds);
 		free_array(envp);
 		exit(EXIT_FAILURE);
 	}
+	_clients_map[client_fd].cgi.pid = pid;
 	close(fd_body[0]);
 	close(fd_res[1]);
-	_setNonBlocking(fd_body[1]);
-	_setNonBlocking(fd_res[0]);
-	if (req.method == POST || req.method == DELETE) {
+	_connectCgi(client_fd, fd_res[0], fd_body[1]);
+}
+
+void Webserv::_connectCgi( int client_fd, int fd_in, int fd_out) {
+	ClientData& client_data = _clients_map[client_fd];
+	CgiData& cgi = client_data.cgi;
+	cgi.client_fd = client_fd;
+	_setNonBlocking(fd_out);
+	_setNonBlocking(fd_in);
+	Method method = client_data.request.method;
+	if (method == POST || method == DELETE) {
 		epoll_event event;
 		event.events = EPOLLOUT;
-		event.data.fd = fd_body[1];
-		if (epoll_ctl(_epoll_fd, EPOLL_CTL_ADD, fd_body[1], &event) == -1) {
-			_initError("Failed to add read pipe to epoll");
-			return;
+		event.data.fd = fd_out;
+		if (epoll_ctl(_epoll_fd, EPOLL_CTL_ADD, fd_out, &event) == -1) {
+			_clients_map[client_fd].response = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 25\r\n\r\n500 Internal Server Error";
+			_modifyEpollSocketOut(client_fd);
+			close(fd_in);
+			return _closeCgiPipe(fd_out, cgi, "Failed to add cgi.fd_out to epoll: ");
 		}
-		_pipe_map[fd_body[1]] = client_fd;
+		_pipe_map[fd_out] = client_fd;
+		cgi.fd_out = fd_out;
 	} else {
-		close(fd_body[1]);
+		close(fd_out);
 	}
 	epoll_event event;
 	event.events = EPOLLIN | EPOLLHUP;
-	event.data.fd = fd_res[0];
-	if (epoll_ctl(_epoll_fd, EPOLL_CTL_ADD, fd_res[0], &event) == -1) {
-		_initError("Failed to add read pipe to epoll");
-		return;
+	event.data.fd = fd_in;
+	if (epoll_ctl(_epoll_fd, EPOLL_CTL_ADD, fd_in, &event) == -1) {
+		_clients_map[client_fd].response = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 25\r\n\r\n500 Internal Server Error";
+		_modifyEpollSocketOut(client_fd);
+		return _closeCgiPipe(fd_in, cgi, "Failed to add cgi.fd_in to epoll: ");
 	}
-	_pipe_map[fd_res[0]] = client_fd;
+	_pipe_map[fd_in] = client_fd;
+	cgi.fd_in = fd_in;
 }
 
 // https://datatracker.ietf.org/doc/html/rfc3875#autoid-16
@@ -400,8 +466,7 @@ char** Webserv::_createEnvp( const Request& req, std::string& path ) {
 	return (envp);
 }
 
-
-void Webserv::_sendResponse( int client_fd ) {
+void Webserv::_sendClientResponse( int client_fd ) {
 	std::string& response = _clients_map[client_fd].response;
 	size_t bytes_sent_total = _clients_map[client_fd].bytes_sent_total;
 	std::size_t chunk_size = _chunk_size;
@@ -421,6 +486,7 @@ void Webserv::_sendResponse( int client_fd ) {
 		_closeClientFd(client_fd, nullptr);
 	} else {
 		_clients_map[client_fd].bytes_sent_total += bytes_sent;
+		_clients_map[client_fd].last_activity = time(nullptr);
 	}
 }
 
