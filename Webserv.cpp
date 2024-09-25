@@ -96,8 +96,8 @@ void Webserv::_mainLoop( void ) {
 	time_t last_timeout_check = time(nullptr);
 	while (_keep_running) {
 		int n = epoll_wait(_epoll_fd, events, _event_array_size, _timeout_period * 1000);
-		// logger.debug("Epoll got events: " + std::to_string(n));
-		if ( n == -1) {
+		logger.debug("Epoll got events: " + std::to_string(n));
+		if (n == -1) {
 			if (_keep_running) perror("epoll_wait");
 			break;
 		} else if (difftime(time(nullptr), last_timeout_check) >= _timeout_period) {
@@ -194,7 +194,7 @@ void Webserv::_getCgiResponse( int fd_in ) {
 	size_t bytes = read(fd_in, buffer, sizeof(buffer));
 	client_data.last_activity = time(nullptr);
 	logger.info("bytes read from pipe: " + std::to_string(bytes));
-	if (bytes > 0) {
+	if (bytes < 0) {
 		response = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 25\r\n\r\n500 Internal Server Error";
 		_modifyEpollSocketOut(client_fd);
 		return _closeCgiPipe(fd_in, client_data.cgi, "read pipe: ");
@@ -202,9 +202,11 @@ void Webserv::_getCgiResponse( int fd_in ) {
 		response.append(buffer, bytes);
 	}
 	if (bytes == 0) {
-		size_t pos = response.find("Status:"); // Need to add first line even if no status in response
+		size_t pos = response.find("Status:");
 		if (pos != std::string::npos) {
 			response.replace(pos, 7, "HTTP/1.1");
+		} else {
+			response.insert(0, "HTTP/1.1 200 OK\r\n");
 		}
 		logger.info(response);
 		_modifyEpollSocketOut(client_fd);
@@ -256,6 +258,7 @@ void Webserv::_handleConnection( void ) {
 }
 
 void Webserv::_closeClientFd( int client_fd, const char* err_msg ) {
+	epoll_ctl(_epoll_fd, EPOLL_CTL_DEL, client_fd, nullptr);
 	close(client_fd);
 	_clients_map.erase(client_fd);
 	if (err_msg != nullptr) {
@@ -308,9 +311,10 @@ int Webserv::_prepareResponse( int client_fd, const std::string& file_path, size
 		std::string cgi_file = "./nginx_example" + file_path;
 		logger.info("CGI file: " + cgi_file);
 		if (access(cgi_file.c_str(), F_OK) == 0) {
-		 	_executeCgi(client_fd, cgi_file);
-		} // Need to add "else"
-		return 0;
+		 	return _executeCgi(client_fd, cgi_file);
+		} else {
+			return _prepareResponse(client_fd, _error_page_404, 404);
+		}
 	}
 	std::string full_path = _root_path + file_path;
 	std::ifstream file(full_path);
@@ -356,18 +360,34 @@ void free_array(char** arr) {
 	free(arr);
 }
 
-void Webserv::_executeCgi( int client_fd, std::string& path ) {
+int Webserv::_endCgi( int fd_res[2], int fd_body[2], int client_fd ) {
+	if (fd_res[0]) {
+		close(fd_res[0]);
+	}
+	if (fd_res[1]) {
+		close(fd_res[1]);
+	}
+	if (fd_body[0]) {
+		close(fd_body[0]);
+	}
+	if (fd_body[1]) {
+		close(fd_body[1]);
+	}
+	std::string& response = _clients_map[client_fd].response;
+	response = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 25\r\n\r\n500 Internal Server Error";
+	return 1;
+}
+
+int Webserv::_executeCgi( int client_fd, std::string& path ) {
 	int fd_res[2], fd_body[2];
 	if (pipe(fd_res) == -1 || pipe(fd_body) == -1) {
 		logger.warning("Pipe failed.");
-		// Need to reply to the client. If first pipe was successful we need to close it
-		return;
+		return _endCgi(fd_res, fd_body, client_fd);
 	}
 	pid_t pid = fork();
 	if (pid == -1) {
 		logger.warning("Fork failed.");
-		// Need to close pipes and to reply to the client
-		return;
+		return _endCgi(fd_res, fd_body, client_fd);
 	} else if (pid == 0) {
 		close(fd_res[0]);
 		close(fd_body[1]);
@@ -386,6 +406,7 @@ void Webserv::_executeCgi( int client_fd, std::string& path ) {
 	close(fd_body[0]);
 	close(fd_res[1]);
 	_connectCgi(client_fd, fd_res[0], fd_body[1]);
+	return 0;
 }
 
 void Webserv::_connectCgi( int client_fd, int fd_in, int fd_out) {

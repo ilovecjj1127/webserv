@@ -73,8 +73,9 @@ private:
 	int _prepareResponse( int client_fd, const std::string& file_path, size_t status_code = 200 );
 	int _getClientRequest( int client_fd );
 
-	void _executeCgi( int client_fd, std::string& path );
+	int _executeCgi( int client_fd, std::string& path );
 	void _connectCgi( int client_fd, int fd_in, int fd_out);
+	int _endCgi( int fd_res[2], int fd_body[2], int client_fd );
 	char** _createEnvp( const Request& req, std::string& path );
 	void _sendCgiRequest( int fd_out );
 	void _getCgiResponse( int fd_in );
