@@ -15,6 +15,7 @@ Webserv::Webserv( void ) {
 	_error_page_404 = "/404.html";
 	_chunk_size = 4096;
 	_timeout_period = 5;
+	_client_max_body_size = 10;
 
 }
 
@@ -280,6 +281,11 @@ int Webserv::_getClientRequest( int client_fd ) {
 	}
 	if (request.status == NEW && request.raw.find("\r\n\r\n") != std::string::npos) {
 		request.status = request.parseRequest();
+		if (request.content_length > _client_max_body_size) {
+			_clients_map[client_fd].response = "HTTP/1.1 413 Request Entity Too Large\r\nContent-Length: 28\r\n\r\n413 Request Entity Too Large";
+			_modifyEpollSocketOut(client_fd);
+			return 3;
+		}
 	} else if (request.status == FULL_HEADER) {
 		request.status = request.getRequestBody();
 	}

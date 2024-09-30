@@ -57,6 +57,7 @@ private:
 	std::unordered_map<int, int> _pipe_map;
 	size_t _chunk_size;
 	int _timeout_period;
+	size_t _client_max_body_size;
 
 	void _stopServer( void );
 	int _initServer( void );
