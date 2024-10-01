@@ -6,16 +6,13 @@ Webserv::Webserv( void ) {
 	logger.setLevel(DEBUG);
 	logger.debug("Webserv instance created");
 	_keep_running = true;
-	_server_fd = -1;
 	_epoll_fd = -1;
 	_event_array_size = 16;
-	_listen_port = 8081;
+	_chunk_size = 4096;
+	_timeout_period = 5;
 	_root_path = "./nginx_example/html";
 	_index_page = "/index.html";
 	_error_page_404 = "/404.html";
-	_chunk_size = 4096;
-	_timeout_period = 5;
-
 }
 
 Webserv::~Webserv( void ) {
@@ -27,59 +24,118 @@ Webserv& Webserv::getInstance( void ) {
 }
 
 int Webserv::startServer( void ) {
-	if (_initServer() == 1) {
+	_fakeConfigParser();
+	if (_initWebserv() != 0) {
 		return 1;
 	}
 	_mainLoop();
 	return 0;
 }
 
-int Webserv::_initServer( void ) {
-	_server_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-	if (_server_fd == -1) {
-		return _initError("Failed to create socket");
-	}
-	sockaddr_in server_addr;
-	server_addr.sin_family = AF_INET;
-	server_addr.sin_addr.s_addr = INADDR_ANY;
-	server_addr.sin_port = htons(_listen_port);
-	int opt = 1;
-	if (setsockopt(_server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) == -1) {
-		return _initError("Failed to set socket opt");
-	}
-	if (bind(_server_fd, (sockaddr*)&server_addr, sizeof(server_addr)) == -1) {
-		return _initError("Failed to bind socket");
-	}
-	if (listen(_server_fd, SOMAXCONN) == -1) {
-		return _initError("Failed to listen on socket");
-	}
-	if (_setNonBlocking(_server_fd) == -1) {
-		return _initError("Failed to set non-blocking mode: server_fd");
+void Webserv::_fakeConfigParser( void ) {
+	ServerData server1;
+	std::pair<uint32_t, uint16_t> listen_pair1(0, 8081);
+	server1.listen_group.push_back(listen_pair1);
+	server1.root_path = "./nginx_example/html";
+	server1.index_page = "/index.html";
+	server1.error_page_404 = "/404.html";
+	_servers.push_back(server1);
+
+	ServerData server2;
+	std::pair<uint32_t, uint16_t> listen_pair2(0, 8082);
+	server2.listen_group.push_back(listen_pair2);
+	server2.root_path = "./nginx_example/html";
+	server2.index_page = "/index.html";
+	server2.error_page_404 = "/404.html";
+	_servers.push_back(server2);
+}
+
+int Webserv::_initWebserv( void ) {
+	std::unordered_map<std::string, int> listen_map;
+	for (ServerData& server : _servers) {
+		if (_initServer(server, listen_map) != 0) {
+			return -1;
+		}
 	}
 	_epoll_fd = epoll_create(1);
 	if (_epoll_fd == -1) {
-		return _initError("Failed to create epoll");
+		return _initError("Failed to create epoll", -1);
 	}
-	epoll_event event;
-	event.events = EPOLLIN;
-	event.data.fd = _server_fd;
-	if (epoll_ctl(_epoll_fd, EPOLL_CTL_ADD, _server_fd, &event) == -1) {
-		return _initError("Failed to add server_fd to epoll");
+	for (const auto& [server_fd, server_ptr] : _server_sockets_map) {
+		if (_addServerToEpoll(server_fd) != 0) {
+			return -1;
+		}
 	}
-	logger.info("Server is listening on port " + std::to_string(_listen_port));
+	logger.info("Webserv is running now");
 	signal(SIGINT, handleSigInt);
 	return 0;
 }
 
-int Webserv::_initError( const char* err_msg ) {
+int Webserv::_initServer( ServerData& server, std::unordered_map<std::string, int>& listen_map) {
+	for (const auto& [ip_address, port] : server.listen_group) {
+		std::string ip_port = std::to_string(ip_address) + ":" + std::to_string(port);
+		int server_fd;
+		if (listen_map.find(ip_port) == listen_map.end()) {
+			server_fd = _createServerSocket(ip_address, port);
+			if (server_fd == -1) {
+				return -1;
+			}
+			listen_map[ip_port] = server_fd;
+		} else {
+			server_fd = listen_map[ip_port];
+		}
+		_server_sockets_map[server_fd].push_back(&server);
+	}
+	return 0;
+}
+
+int Webserv::_createServerSocket( uint32_t ip_address, uint16_t port ) {
+	int server_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	if (server_fd == -1) {
+		return _initError("Failed to create socket", -1);
+	}
+	sockaddr_in server_addr;
+	server_addr.sin_family = AF_INET;
+	server_addr.sin_addr.s_addr = htonl(ip_address);
+	server_addr.sin_port = htons(port);
+	int opt = 1;
+	if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) == -1) {
+		return _initError("Failed to set socket opt", server_fd);
+	}
+	if (bind(server_fd, (sockaddr*)&server_addr, sizeof(server_addr)) == -1) {
+		return _initError("Failed to bind socket", server_fd);
+	}
+	if (listen(server_fd, SOMAXCONN) == -1) {
+		return _initError("Failed to listen on socket", server_fd);
+	}
+	if (_setNonBlocking(server_fd) == -1) {
+		return _initError("Failed to set non-blocking mode: server_fd", server_fd);
+	}
+	return server_fd;
+}
+
+int Webserv::_addServerToEpoll( const int server_fd ) {
+	epoll_event event;
+	event.events = EPOLLIN;
+	event.data.fd = server_fd;
+	if (epoll_ctl(_epoll_fd, EPOLL_CTL_ADD, server_fd, &event) == -1) {
+		return _initError("Failed to add server_fd to epoll", -1);
+	}
+	return 0;
+}
+
+int Webserv::_initError( const char* err_msg, int fd ) {
 	perror(err_msg);
-	if (_server_fd != -1) {
-		close(_server_fd);
+	if (fd != -1) {
+		close(fd);
+	}
+	for ( const auto& [server_fd, server_ptr] : _server_sockets_map ) {
+		close(server_fd);
 	}
 	if (_epoll_fd != -1) {
 		close(_epoll_fd);
 	}
-	return 1;
+	return -1;
 }
 
 int Webserv::_setNonBlocking( int fd ) {
@@ -116,8 +172,8 @@ void Webserv::_mainLoop( void ) {
 }
 
 void Webserv::_handleEvent( epoll_event& event ) {
-	if (event.data.fd == _server_fd) {
-		_handleConnection();
+	if (_server_sockets_map.find(event.data.fd) != _server_sockets_map.end()) {
+		_handleConnection(event.data.fd);
 	} else if (_pipe_map.find(event.data.fd) != _pipe_map.end()) {
 		if (event.events & EPOLLOUT) {
 			_sendCgiRequest(event.data.fd);
@@ -175,7 +231,7 @@ void Webserv::_sendCgiRequest( int fd_out ) {
 		chunk_size = request.body.size() - bytes_write_total;
 	}
 	std::string_view chunk(request.body.c_str() + bytes_write_total, chunk_size);
-	size_t bytes = write(fd_out, chunk.data(), chunk_size);
+	ssize_t bytes = write(fd_out, chunk.data(), chunk_size);
 	client_data.last_activity = time(nullptr);
 	if (bytes < 0) {
 		client_data.response = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 25\r\n\r\n500 Internal Server Error";
@@ -191,7 +247,7 @@ void Webserv::_getCgiResponse( int fd_in ) {
 	ClientData& client_data = _clients_map[client_fd];
 	std::string& response = client_data.response;
 	char buffer[_chunk_size];
-	size_t bytes = read(fd_in, buffer, sizeof(buffer));
+	ssize_t bytes = read(fd_in, buffer, sizeof(buffer));
 	client_data.last_activity = time(nullptr);
 	logger.info("bytes read from pipe: " + std::to_string(bytes));
 	if (bytes < 0) {
@@ -233,10 +289,10 @@ void Webserv::_closeCgiPipe( int pipe_fd, CgiData& cgi, const char* err_msg ) {
 	}
 }
 
-void Webserv::_handleConnection( void ) {
+void Webserv::_handleConnection( const int server_fd ) {
 	sockaddr_in client_addr;
 	socklen_t client_len = sizeof(client_addr);
-	int client_fd = accept(_server_fd, (sockaddr*)&client_addr, &client_len);
+	int client_fd = accept(server_fd, (sockaddr*)&client_addr, &client_len);
 	if (client_fd == -1) {
 		perror("Failed to accept connection");
 		return;
@@ -464,7 +520,7 @@ char** Webserv::_createEnvp( const Request& req, std::string& path ) {
 		{DELETE, "DELETE"}
 	};
 	env_map["REQUEST_METHOD"] = methods_map[req.method];
-	env_map["SERVER_PORT"] = std::to_string(_listen_port);
+	// env_map["SERVER_PORT"] = std::to_string(_listen_port);
 	
 	char** envp;
 	std::string temp_str;
@@ -525,7 +581,9 @@ std::string Webserv::_getHtmlHeader( size_t content_length, size_t status_code )
 
 void Webserv::_stopServer( void ) {
 	_keep_running = false;
-	close(_server_fd);
+	for ( const auto& [server_fd, server_ptr] : _server_sockets_map ) {
+		close(server_fd);
+	}
 }
 
 void Webserv::handleSigInt(int signum) {
