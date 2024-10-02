@@ -38,10 +38,13 @@ struct ClientData {
 	size_t		bytes_write_total = 0;
 	time_t		last_activity;
 	CgiData		cgi;
+	int			server_fd = 0;
+	ServerData*	server = nullptr;
 };
 
 struct ServerData {
 	std::vector<std::pair<uint32_t, uint16_t>>	listen_group; // <ip_address, port> pairs
+	std::vector<std::string>					server_names;
 	std::string 								root_path;
 	std::string 								index_page;
 	std::string 								error_page_404;
@@ -68,6 +71,7 @@ private:
 	int _timeout_period;
 
 	void _fakeConfigParser( void );
+	void _get_target_server(int client_fd, std::string host);
 
 	void _stopServer( void );
 	int _initWebserv( void );

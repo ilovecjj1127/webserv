@@ -35,6 +35,7 @@ void Webserv::_handleConnection( const int server_fd ) {
 		return;
 	} else {
 		_clients_map[client_fd].last_activity = time(nullptr);
+        _clients_map[client_fd].server_fd = server_fd;
 	}
 	if (_setNonBlocking(client_fd) == -1) {
 		_closeClientFd(client_fd, "Failed to set non-blocking mode: client_fd");
@@ -63,6 +64,7 @@ int Webserv::_getClientRequest( int client_fd ) {
 	}
 	if (request.status == NEW && request.raw.find("\r\n\r\n") != std::string::npos) {
 		request.status = request.parseRequest();
+        _get_target_server(client_fd, request.headers["Host"]);
 	} else if (request.status == FULL_HEADER) {
 		request.status = request.getRequestBody();
 	}
