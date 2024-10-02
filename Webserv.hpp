@@ -16,6 +16,8 @@
 #include <netinet/in.h>
 #include <unistd.h>
 #include <vector>
+#include <list>
+#include <algorithm>
 
 #include "Logger.hpp"
 #include "Request.hpp"
@@ -38,6 +40,14 @@ struct ClientData {
 	CgiData		cgi;
 };
 
+struct Location {
+	std::string			path;
+	std::string			root;
+	std::string			index;
+	bool				autoindex = false;
+	std::list<Method>	allowed_methods = {GET, POST, DELETE};
+};
+
 class Webserv {
 private:
 	Webserv( void );
@@ -50,6 +60,7 @@ private:
 	int _epoll_fd;
 	size_t _event_array_size;
 	uint16_t _listen_port;
+	Location _location;
 	std::string _root_path;
 	std::string _index_page;
 	std::string _error_page_404;
@@ -73,6 +84,7 @@ private:
 	void _sendClientResponse( int client_fd );
 	int _prepareResponse( int client_fd, const std::string& file_path, size_t status_code = 200 );
 	int _getClientRequest( int client_fd );
+	int _checkRequestValid( const Request& request, int client_fd );
 
 	int _executeCgi( int client_fd, std::string& path );
 	void _connectCgi( int client_fd, int fd_in, int fd_out);

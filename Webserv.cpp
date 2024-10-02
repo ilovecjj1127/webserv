@@ -12,6 +12,7 @@ Webserv::Webserv( void ) {
 	_listen_port = 8081;
 	_root_path = "./nginx_example/html";
 	_index_page = "/index.html";
+	// _location("/", _root_path, _index_page, false, {POST, DELETE});
 	_error_page_404 = "/404.html";
 	_chunk_size = 4096;
 	_timeout_period = 5;
@@ -281,9 +282,7 @@ int Webserv::_getClientRequest( int client_fd ) {
 	}
 	if (request.status == NEW && request.raw.find("\r\n\r\n") != std::string::npos) {
 		request.status = request.parseRequest();
-		if (request.content_length > _client_max_body_size) {
-			_clients_map[client_fd].response = "HTTP/1.1 413 Request Entity Too Large\r\nContent-Length: 28\r\n\r\n413 Request Entity Too Large";
-			_modifyEpollSocketOut(client_fd);
+		if (request.status != INVALID && _checkRequestValid(request, client_fd)) {
 			return 3;
 		}
 	} else if (request.status == FULL_HEADER) {
@@ -295,6 +294,22 @@ int Webserv::_getClientRequest( int client_fd ) {
 	_clients_map[client_fd].last_activity = time(nullptr);
 	if (request.status == NEW || request.status == FULL_HEADER) {
 		return 2;
+	}
+	return 0;
+}
+
+// check for allowed_method and client_max_body size
+int Webserv::_checkRequestValid( const Request& request, int client_fd ) {
+	std::list<Method>& methods = _location.allowed_methods;
+	if (std::find(methods.begin(), methods.end(), request.method) == methods.end()) {
+		_clients_map[client_fd].response = "HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 22\r\n\r\n405 Method Not Allowed";
+		_modifyEpollSocketOut(client_fd);
+		return 1;
+	}
+	if (request.content_length > _client_max_body_size) {
+		_clients_map[client_fd].response = "HTTP/1.1 413 Request Entity Too Large\r\nContent-Length: 28\r\n\r\n413 Request Entity Too Large";
+		_modifyEpollSocketOut(client_fd);
+		return 1;
 	}
 	return 0;
 }
