@@ -147,7 +147,18 @@ std::string Webserv::_getHtmlHeader( size_t content_length, size_t status_code )
 	return header;
 }
 
-void Webserv::_get_target_server(int client_fd, std::string host) {
+void Webserv::_get_target_server(int client_fd, const std::string& host) {
 	ClientData& client_data = _clients_map[client_fd];
-	
+	size_t delimiter = host.find(":");
+	std::string hostname = host.substr(0, delimiter);
+	int server_fd = client_data.server_fd;
+	for (ServerData* server : _server_sockets_map[server_fd]) {
+		const std::vector<std::string>& server_names = server->server_names;
+		auto it = std::find(server_names.begin(), server_names.end(), hostname);
+		if (it != server_names.end()) {
+			client_data.server = server;
+			return;
+		}
+	}
+	client_data.server = _server_sockets_map[server_fd].front();
 }

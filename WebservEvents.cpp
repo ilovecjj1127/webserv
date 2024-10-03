@@ -64,7 +64,7 @@ int Webserv::_getClientRequest( int client_fd ) {
 	}
 	if (request.status == NEW && request.raw.find("\r\n\r\n") != std::string::npos) {
 		request.status = request.parseRequest();
-        _get_target_server(client_fd, request.headers["Host"]);
+		_get_target_server(client_fd, request.headers["Host"]);
 	} else if (request.status == FULL_HEADER) {
 		request.status = request.getRequestBody();
 	}
