@@ -13,11 +13,13 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <sys/stat.h>
 #include <netinet/in.h>
 #include <unistd.h>
 #include <vector>
 #include <list>
 #include <algorithm>
+#include <dirent.h>
 
 #include "Logger.hpp"
 #include "Request.hpp"
@@ -44,7 +46,7 @@ struct Location {
 	std::string			path;
 	std::string			root;
 	std::string			index;
-	bool				autoindex = false;
+	bool				autoindex = true;
 	std::list<Method>	allowed_methods = {GET, POST, DELETE};
 };
 
@@ -85,6 +87,7 @@ private:
 	int _prepareResponse( int client_fd, const std::string& file_path, size_t status_code = 200 );
 	int _getClientRequest( int client_fd );
 	int _checkRequestValid( const Request& request, int client_fd );
+	void _generateDirectoryList( const std::string &dir_path, int client_fd );
 
 	int _executeCgi( int client_fd, std::string& path );
 	void _connectCgi( int client_fd, int fd_in, int fd_out);

@@ -323,12 +323,82 @@ void Webserv::_modifyEpollSocketOut( int client_fd ) {
 	}
 }
 
+//#include <sys/stat.h>
+int isDirectory( const std::string& full_path ) {
+	struct stat path_stat;
+	if (stat(full_path.c_str(), &path_stat) == 0) {
+		return (S_ISDIR(path_stat.st_mode));
+	}
+	return 0;
+}
+
+std::string getModTime( const std::string& path ) {
+	struct stat file_stat;
+	if (stat(path.c_str(), &file_stat) == 0) {
+		struct tm *tm = localtime(&file_stat.st_mtime);
+		char timebuf[80];
+		strftime(timebuf, sizeof(timebuf), "%d-%b-%Y %H:%M", tm);
+		return std::string(timebuf);
+	}
+	return "Unknown";
+}
+
+//#include <dirent.h>
+void Webserv::_generateDirectoryList( const std::string &dir_path, int client_fd ) {
+	std::ostringstream html;
+	std::string& response = _clients_map[client_fd].response;
+	std::string& file_path = _clients_map[client_fd].request.path;
+
+	html << "<html><body><h1>Index of " << file_path << "</h1>\n<hr><table>\n";
+
+	DIR *dir = opendir(dir_path.c_str());
+	if (dir == nullptr) {
+		response = "HTTP/1.1 403 Forbidden\r\n\r\nContent-Length: 13\r\n\r\n403 Forbidden";
+		logger.warning("Failed to open directory" + dir_path);
+		return;
+	}
+	struct dirent *entry;
+	while ((entry = readdir(dir)) != nullptr) {
+		std::string name = entry->d_name;
+		std::string full_path;
+		std::string size;
+		if (name == ".") continue;
+		if (dir_path.back() != '/') {
+			full_path = dir_path + "/" + name;
+		} else {
+			full_path = dir_path + name;
+		}
+		if (entry->d_type == DT_DIR) {
+			name += "/";
+			size = "-";
+		} else {
+			struct stat st;
+			stat(full_path.c_str(), &st);
+			size = std::to_string(st.st_size);
+		}
+		std::string mod_time = getModTime(full_path);
+		html << "<tr><td><a href=\"" << name << "\">" << name << "</a></td>"
+			 << "<td>" << mod_time << "</td>"
+			 << "<td align=\"right\">" << size << "</td></tr>\n";
+	}
+	closedir(dir);
+	html << "</table>\n<hr></body>\n</html>\n";
+	response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: ";
+	response += std::to_string(html.str().size())+ "\r\n\r\n" + html.str();
+}
+
 int Webserv::_prepareResponse( int client_fd, const std::string& file_path, size_t status_code ) {
 	std::string& response = _clients_map[client_fd].response;
-	if (file_path == "/" && file_path != _index_page) {
+	if (file_path == "/" && !_location.autoindex) {
 		return _prepareResponse(client_fd, _index_page, 200);
 	}
-	if (file_path.substr(file_path.size() - 3) == ".py") {
+	std::string full_path = _root_path + file_path;
+	std::ifstream file(full_path);
+	if (isDirectory(full_path) && _location.autoindex) {
+		_generateDirectoryList(full_path, client_fd);
+		return 1;
+	}
+	if (full_path.substr(file_path.size() - 3) == ".py") {
 		std::string cgi_file = "./nginx_example" + file_path;
 		logger.info("CGI file: " + cgi_file);
 		if (access(cgi_file.c_str(), F_OK) == 0) {
@@ -337,8 +407,6 @@ int Webserv::_prepareResponse( int client_fd, const std::string& file_path, size
 			return _prepareResponse(client_fd, _error_page_404, 404);
 		}
 	}
-	std::string full_path = _root_path + file_path;
-	std::ifstream file(full_path);
 	if (!file.is_open() && file_path != _error_page_404) {
 		logger.warning("Failed to open file: " + full_path);
 		return _prepareResponse(client_fd, _error_page_404, 404);
