@@ -48,18 +48,12 @@ void Webserv::_fakeConfigParser( void ) {
 	ServerData server1;
 	std::pair<uint32_t, uint16_t> listen_pair1(0, 8081);
 	server1.listen_group.push_back(listen_pair1);
-	server1.root_path = "./nginx_example/html";
-	server1.index_page = "/index.html";
-	server1.error_page_404 = "/404.html";
 	_servers.push_back(server1);
 
 	ServerData server2;
 	std::pair<uint32_t, uint16_t> listen_pair2(0, 8082);
 	server2.listen_group.push_back(listen_pair2);
 	server2.server_names.push_back("localhost");
-	server2.root_path = "./nginx_example/html";
-	server2.index_page = "/index.html";
-	server2.error_page_404 = "/404.html";
 	_servers.push_back(server2);
 }
 
@@ -221,7 +215,7 @@ std::string Webserv::_getHtmlHeader( size_t content_length, size_t status_code )
 	return header;
 }
 
-void Webserv::_get_target_server(int client_fd, const std::string& host) {
+void Webserv::_getTargetServer(int client_fd, const std::string& host) {
 	ClientData& client_data = _clients_map[client_fd];
 	size_t delimiter = host.find(":");
 	std::string hostname = host.substr(0, delimiter);

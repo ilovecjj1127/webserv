@@ -34,20 +34,23 @@ struct CgiData {
 };
 
 struct Location {
-	std::string			path;
-	std::string			root;
-	std::string			index_page;
-	bool				autoindex = true;
-	std::list<Method>	allowed_methods = {GET, POST, DELETE};
+	std::string								path;
+	std::string								root;
+	std::string								index_page;
+	bool									autoindex = false;
+	size_t									client_max_body_size;
+	std::set<Method>						allowed_methods = {GET, POST, DELETE};
+	std::unordered_map<int, std::string>	error_pages;
 };
 
 struct ServerData {
 	std::vector<std::pair<uint32_t, uint16_t>>	listen_group; // <ip_address, port> pairs
 	std::vector<std::string>					server_names;
 	std::vector<Location>						locations; // need to be sorted by path length(longest first)
-	std::string 								root_path;
 	std::string 								index_page;
-	std::string 								error_page_404;
+	bool										autoindex = false;
+	size_t										client_max_body_size;
+	std::unordered_map<int, std::string>		error_pages;
 };
 
 struct ClientData {
@@ -85,37 +88,44 @@ private:
 	int _timeout_period;
 	size_t _client_max_body_size;
 
-	void _fakeConfigParser( void );
-	void _get_target_server(int client_fd, const std::string& host);
-	int _getTargetLocation( int client_fd );
-
+	// Webserv.cpp
 	void _stopServer( void );
+	void _mainLoop( void );
+	void _checkTimeouts( void );
+	std::string _getHtmlHeader( size_t content_length, size_t status_code );
+	int _prepareResponse( int client_fd, const std::string& file_path, size_t status_code = 200 );
+	void _generateDirectoryList( const std::string &dir_path, int client_fd );
+	void _fakeConfigParser( void );
+	void _getTargetServer(int client_fd, const std::string& host);
+
+	// WebservCgi.cpp
+	int _executeCgi( int client_fd, std::string& path );
+	void _connectCgi( int client_fd, int fd_in, int fd_out);
+	int _endCgi( int fd_res[2], int fd_body[2], int client_fd );
+	char** _createEnvp( const Request& req, std::string& path );
+	void _closeCgiPipe( int pipe_fd, CgiData& cgi, const char* err_msg );
+
+	// WebservEvents.cpp
+	void _handleEvent( epoll_event& event );
+	void _handleConnection( const int server_fd );
+	int _getClientRequest( int client_fd );
+	void _sendClientResponse( int client_fd );
+	void _getCgiResponse( int fd_in );
+	void _sendCgiRequest( int fd_out );
+	int _getTargetLocation( int client_fd );
+	int _checkRequestValid( const Request& request, int client_fd );
+
+	// WebservInit.cpp
 	int _initWebserv( void );
 	int _initServer( ServerData& server, std::unordered_map<std::string, int>& listen_map);
 	int _createServerSocket( uint32_t ip_address, uint16_t port );
 	int _addServerToEpoll( const int server_fd );
 	int _initError( const char* err_msg, int fd );
-	int _setNonBlocking( int fd );
-	void _mainLoop( void );
-	void _checkTimeouts( void );
-	void _handleEvent( epoll_event& event );
-	void _closeClientFd( int client_fd, const char* err_msg );
-	std::string _getHtmlHeader( size_t content_length, size_t status_code );
-	void _handleConnection( const int server_fd );
-	void _modifyEpollSocketOut( int client_fd );
-	void _sendClientResponse( int client_fd );
-	int _prepareResponse( int client_fd, const std::string& file_path, size_t status_code = 200 );
-	int _getClientRequest( int client_fd );
-	int _checkRequestValid( const Request& request, int client_fd );
-	void _generateDirectoryList( const std::string &dir_path, int client_fd );
 
-	int _executeCgi( int client_fd, std::string& path );
-	void _connectCgi( int client_fd, int fd_in, int fd_out);
-	int _endCgi( int fd_res[2], int fd_body[2], int client_fd );
-	char** _createEnvp( const Request& req, std::string& path );
-	void _sendCgiRequest( int fd_out );
-	void _getCgiResponse( int fd_in );
-	void _closeCgiPipe( int pipe_fd, CgiData& cgi, const char* err_msg );
+	// WebservUtils.cpp
+	int _setNonBlocking( int fd );
+	void _closeClientFd( int client_fd, const char* err_msg );
+	void _modifyEpollSocketOut( int client_fd );
 
 public:
 	Webserv( const Webserv& ) = delete;

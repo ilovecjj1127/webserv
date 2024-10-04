@@ -64,6 +64,7 @@ int Webserv::_getClientRequest( int client_fd ) {
 	}
 	if (request.status == NEW && request.raw.find("\r\n\r\n") != std::string::npos) {
 		request.status = request.parseRequest();
+		_getTargetServer(client_fd, request.headers["Host"]);
 		if (request.status != INVALID) {
 			// if (_getTargetLocation(client_fd)) return 4;
 			if (_checkRequestValid(request, client_fd)) return 3;
@@ -105,8 +106,8 @@ int Webserv::_getTargetLocation( int client_fd ) {
 // check for allowed_method and client_max_body size
 // _clients_map[client_fd].location
 int Webserv::_checkRequestValid( const Request& request, int client_fd ) {
-	std::list<Method>& methods = _location.allowed_methods;
-	if (std::find(methods.begin(), methods.end(), request.method) == methods.end()) {
+	std::set<Method>& methods = _location.allowed_methods;
+	if (methods.find(request.method) == methods.end()) {
 		_clients_map[client_fd].response = "HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 22\r\n\r\n405 Method Not Allowed";
 		_modifyEpollSocketOut(client_fd);
 		return 1;
