@@ -12,6 +12,7 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <sys/stat.h>
 #include <netinet/in.h>
 #include <unistd.h>
 #include <list>
@@ -19,6 +20,7 @@
 #include <unordered_map>
 #include <vector>
 #include <algorithm>
+#include <dirent.h>
 
 #include "Logger.hpp"
 #include "Request.hpp"
@@ -31,9 +33,18 @@ struct CgiData {
 	int		fd_out = 0;
 };
 
+struct Location {
+	std::string			path;
+	std::string			root;
+	std::string			index_page;
+	bool				autoindex = true;
+	std::list<Method>	allowed_methods = {GET, POST, DELETE};
+};
+
 struct ServerData {
 	std::vector<std::pair<uint32_t, uint16_t>>	listen_group; // <ip_address, port> pairs
 	std::vector<std::string>					server_names;
+	std::vector<Location>						locations; // need to be sorted by path length(longest first)
 	std::string 								root_path;
 	std::string 								index_page;
 	std::string 								error_page_404;
@@ -49,6 +60,7 @@ struct ClientData {
 	CgiData		cgi;
 	int			server_fd = 0;
 	ServerData*	server = nullptr;
+	Location*	location = nullptr;
 };
 
 class Webserv {
@@ -63,6 +75,7 @@ private:
 	size_t _event_array_size;
 	std::string _root_path;
 	std::string _index_page;
+	Location _location;
 	std::string _error_page_404;
 	std::vector<ServerData> _servers;
 	std::unordered_map<int, ClientData> _clients_map;
@@ -70,9 +83,11 @@ private:
 	std::unordered_map<int, std::list<ServerData*>> _server_sockets_map;
 	size_t _chunk_size;
 	int _timeout_period;
+	size_t _client_max_body_size;
 
 	void _fakeConfigParser( void );
 	void _get_target_server(int client_fd, const std::string& host);
+	int _getTargetLocation( int client_fd );
 
 	void _stopServer( void );
 	int _initWebserv( void );
@@ -91,6 +106,8 @@ private:
 	void _sendClientResponse( int client_fd );
 	int _prepareResponse( int client_fd, const std::string& file_path, size_t status_code = 200 );
 	int _getClientRequest( int client_fd );
+	int _checkRequestValid( const Request& request, int client_fd );
+	void _generateDirectoryList( const std::string &dir_path, int client_fd );
 
 	int _executeCgi( int client_fd, std::string& path );
 	void _connectCgi( int client_fd, int fd_in, int fd_out);

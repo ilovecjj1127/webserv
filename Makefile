@@ -8,7 +8,7 @@ SOURCES = Webserv.cpp WebservInit.cpp WebservEvents.cpp WebservCgi.cpp WebservUt
 
 OBJECTS = $(addprefix $(OBJ_DIR)/, $(SOURCES:.cpp=.o))
 
-CFLAGS += -Wall -Wextra -Werror -std=c++20
+CFLAGS += -Wall -Wextra -Werror -std=c++20 -g
 
 all: $(NAME)
 

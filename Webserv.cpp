@@ -12,7 +12,12 @@ Webserv::Webserv( void ) {
 	_timeout_period = 5;
 	_root_path = "./nginx_example/html";
 	_index_page = "/index.html";
+	// _location("/", _root_path, _index_page, false, {POST, DELETE});
 	_error_page_404 = "/404.html";
+	_chunk_size = 4096;
+	_timeout_period = 5;
+	_client_max_body_size = 4096;
+
 }
 
 Webserv::~Webserv( void ) {
@@ -63,7 +68,7 @@ void Webserv::_mainLoop( void ) {
 	time_t last_timeout_check = time(nullptr);
 	while (_keep_running) {
 		int n = epoll_wait(_epoll_fd, events, _event_array_size, _timeout_period * 1000);
-		logger.debug("Epoll got events: " + std::to_string(n));
+		// logger.debug("Epoll got events: " + std::to_string(n));
 		if (n == -1) {
 			if (_keep_running) perror("epoll_wait");
 			break;
@@ -103,12 +108,82 @@ void Webserv::_checkTimeouts( void ) {
 	}
 }
 
+//#include <sys/stat.h>
+int isDirectory( const std::string& full_path ) {
+	struct stat path_stat;
+	if (stat(full_path.c_str(), &path_stat) == 0) {
+		return (S_ISDIR(path_stat.st_mode));
+	}
+	return 0;
+}
+
+std::string getModTime( const std::string& path ) {
+	struct stat file_stat;
+	if (stat(path.c_str(), &file_stat) == 0) {
+		struct tm *tm = localtime(&file_stat.st_mtime);
+		char timebuf[80];
+		strftime(timebuf, sizeof(timebuf), "%d-%b-%Y %H:%M", tm);
+		return std::string(timebuf);
+	}
+	return "Unknown";
+}
+
+//#include <dirent.h>
+void Webserv::_generateDirectoryList( const std::string &dir_path, int client_fd ) {
+	std::ostringstream html;
+	std::string name, full_path, size, mod_time;
+	std::string& response = _clients_map[client_fd].response;
+	std::string& file_path = _clients_map[client_fd].request.path;
+
+	html << "<html><body><h1>Index of " << file_path << "</h1>\n<hr><pre><table>\n";
+
+	DIR *dir = opendir(dir_path.c_str());
+	if (dir == nullptr) {
+		response = "HTTP/1.1 403 Forbidden\r\n\r\nContent-Length: 13\r\n\r\n403 Forbidden";
+		logger.warning("Failed to open directory" + dir_path);
+		return;
+	}
+	struct dirent *entry;
+	while ((entry = readdir(dir)) != nullptr) {
+		name = entry->d_name;
+		full_path = dir_path + name;
+		if (name == ".") continue;
+		if (name == "..") {
+			name += "/";
+		} else if (entry->d_type == DT_DIR) {
+			name += "/";
+			size = "-";
+			mod_time = getModTime(full_path);
+		} else {
+			struct stat st;
+			stat(full_path.c_str(), &st);
+			size = std::to_string(st.st_size);
+			mod_time = getModTime(full_path);
+		}
+		html << "<tr><td style=\"width:70%\"><a href=\"" << name << "\">" << name << "</a></td>"
+			 << "<td style=\"width:20%\">" << mod_time << "</td>"
+			 << "<td align=\"right\">" << size << "</td></tr>\n";
+	}
+	closedir(dir);
+	html << "</table>\n</pre><hr></body>\n</html>\n";
+	response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: ";
+	response += std::to_string(html.str().size())+ "\r\n\r\n" + html.str();
+}
+
 int Webserv::_prepareResponse( int client_fd, const std::string& file_path, size_t status_code ) {
 	std::string& response = _clients_map[client_fd].response;
-	if (file_path == "/" && file_path != _index_page) {
+	std::string full_path = _root_path + file_path;
+	if (file_path == "/" && access((_root_path + _index_page).c_str(), F_OK) == 0) { // only if there is index_page
 		return _prepareResponse(client_fd, _index_page, 200);
+	} else if (full_path.back() == '/' && isDirectory(full_path)) {
+		if (_location.autoindex) {
+			_generateDirectoryList(full_path, client_fd);
+		} else {
+			response = "HTTP/1.1 403 Forbidden\r\n\r\nContent-Length: 13\r\n\r\n403 Forbidden";
+		}
+		return 1;
 	}
-	if (file_path.substr(file_path.size() - 3) == ".py") {
+	if (full_path.substr(full_path.size() - 3) == ".py") {
 		std::string cgi_file = "./nginx_example" + file_path;
 		logger.info("CGI file: " + cgi_file);
 		if (access(cgi_file.c_str(), F_OK) == 0) {
@@ -117,12 +192,11 @@ int Webserv::_prepareResponse( int client_fd, const std::string& file_path, size
 			return _prepareResponse(client_fd, _error_page_404, 404);
 		}
 	}
-	std::string full_path = _root_path + file_path;
 	std::ifstream file(full_path);
 	if (!file.is_open() && file_path != _error_page_404) {
 		logger.warning("Failed to open file: " + full_path);
 		return _prepareResponse(client_fd, _error_page_404, 404);
-	} else if (!file.is_open()) {
+	} else if (isDirectory(full_path) || !file.is_open()) {
 		logger.warning("Failed to open file: " + full_path);
 		std::string page404 = "HTTP/1.1 404 Not Found\r\nContent-Length: 13\r\n\r\n404 Not Found";
 		response = page404;

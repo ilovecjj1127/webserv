@@ -64,7 +64,10 @@ int Webserv::_getClientRequest( int client_fd ) {
 	}
 	if (request.status == NEW && request.raw.find("\r\n\r\n") != std::string::npos) {
 		request.status = request.parseRequest();
-		_get_target_server(client_fd, request.headers["Host"]);
+		if (request.status != INVALID) {
+			// if (_getTargetLocation(client_fd)) return 4;
+			if (_checkRequestValid(request, client_fd)) return 3;
+		}
 	} else if (request.status == FULL_HEADER) {
 		request.status = request.getRequestBody();
 	}
@@ -74,6 +77,44 @@ int Webserv::_getClientRequest( int client_fd ) {
 	_clients_map[client_fd].last_activity = time(nullptr);
 	if (request.status == NEW || request.status == FULL_HEADER) {
 		return 2;
+	}
+	return 0;
+}
+
+int Webserv::_getTargetLocation( int client_fd ) {
+	std::vector<Location>& locations = _clients_map[client_fd].server->locations;
+	std::string& path = _clients_map[client_fd].request.path;
+
+	std::sort(locations.begin(), locations.end(),
+			 [](const Location& a, const Location& b) {
+				return a.path.size() > b.path.size();  // Sort by path length (longest first)
+			 });
+	for (auto& location : locations) {
+		if (path.compare(0, location.path.size(), location.path) == 0) {
+			_clients_map[client_fd].location = &location;
+			return 0;
+		}
+	}
+	if (_clients_map[client_fd].location == nullptr) {
+		_clients_map[client_fd].response = "HTTP/1.1 404 Not Found\r\nContent-Length: 13\r\n\r\n404 Not Found";
+		_modifyEpollSocketOut(client_fd);
+	}
+	return 1;
+}
+
+// check for allowed_method and client_max_body size
+// _clients_map[client_fd].location
+int Webserv::_checkRequestValid( const Request& request, int client_fd ) {
+	std::list<Method>& methods = _location.allowed_methods;
+	if (std::find(methods.begin(), methods.end(), request.method) == methods.end()) {
+		_clients_map[client_fd].response = "HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 22\r\n\r\n405 Method Not Allowed";
+		_modifyEpollSocketOut(client_fd);
+		return 1;
+	}
+	if (request.content_length > _client_max_body_size) {
+		_clients_map[client_fd].response = "HTTP/1.1 413 Request Entity Too Large\r\nContent-Length: 28\r\n\r\n413 Request Entity Too Large";
+		_modifyEpollSocketOut(client_fd);
+		return 1;
 	}
 	return 0;
 }
