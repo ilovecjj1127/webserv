@@ -45,7 +45,7 @@ RqStatus Request::parseRequest( void ) {
 		}
 		std::string key = line.substr(0, delimiter);
 		std::string value = line.substr(delimiter + 2);
-		headers[key] = value;		
+		headers[key] = value;	
 	}
 	if (request_stream) {
 		std::getline(request_stream, raw, '\0');
