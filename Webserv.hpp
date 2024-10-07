@@ -72,6 +72,8 @@ private:
 	~Webserv( void );
 
 	static Webserv _instance;
+	static const std::unordered_map<int, std::string> _response_codes;
+	static const std::unordered_map<int, std::string> _error_pages;
 
 	bool _keep_running;
 	int _epoll_fd;

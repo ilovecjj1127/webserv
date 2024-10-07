@@ -2,6 +2,23 @@
 
 Webserv Webserv::_instance;
 
+const std::unordered_map<int, std::string> Webserv::_response_codes = {
+	{200, "200 OK"},
+	{403, "403 Forbidden"},
+	{404, "404 Not Found"},
+	{405, "405 Method Not Allowed"},
+	{413, "413 Request Entity Too Large"},
+	{500, "500 Internal Server Error"}
+};
+
+const std::unordered_map<int, std::string> Webserv::_error_pages = {
+	{403, "./default_pages/403.html"},
+	{404, "./default_pages/404.html"},
+	{405, "./default_pages/405.html"},
+	{413, "./default_pages/413.html"},
+	{500, "./default_pages/500.html"}
+};
+
 Webserv::Webserv( void ) {
 	logger.setLevel(DEBUG);
 	logger.debug("Webserv instance created");
