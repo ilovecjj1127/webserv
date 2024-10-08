@@ -38,18 +38,20 @@ struct Location {
 	std::string								root;
 	std::string								index_page;
 	bool									autoindex = false;
-	size_t									client_max_body_size;
+	size_t									client_max_body_size = 1048576;
 	std::set<Method>						allowed_methods = {GET, POST, DELETE};
 	std::unordered_map<int, std::string>	error_pages;
+	std::string								redirect_path = "";
+	int										redirect_code;
 };
 
 struct ServerData {
 	std::vector<std::pair<uint32_t, uint16_t>>	listen_group; // <ip_address, port> pairs
 	std::vector<std::string>					server_names;
-	std::vector<Location>						locations; // need to be sorted by path length(longest first)
+	std::vector<Location>						locations;
 	std::string 								index_page;
 	bool										autoindex = false;
-	size_t										client_max_body_size;
+	size_t										client_max_body_size = 1048576;
 	std::unordered_map<int, std::string>		error_pages;
 };
 
@@ -78,9 +80,6 @@ private:
 	bool _keep_running;
 	int _epoll_fd;
 	size_t _event_array_size;
-	std::string _root_path;
-	std::string _index_page;
-	Location _location;
 	std::string _error_page_404;
 	std::vector<ServerData> _servers;
 	std::unordered_map<int, ClientData> _clients_map;
@@ -88,7 +87,6 @@ private:
 	std::unordered_map<int, std::list<ServerData*>> _server_sockets_map;
 	size_t _chunk_size;
 	int _timeout_period;
-	size_t _client_max_body_size;
 
 	// Webserv.cpp
 	void _stopServer( void );
@@ -102,6 +100,8 @@ private:
 	int _prepareResponseError( ClientData& client_data, size_t status_code );
 	std::string _getErrorPagePath(const std::unordered_map<int, std::string>& error_pages, size_t status_code);
 	int _saveResponsePage( ClientData& client_data, std::string& filepath, int status_code );
+	void _sortLocationByPath( void );
+	void _printConfig( void ) const;
 
 	// WebservCgi.cpp
 	int _executeCgi( int client_fd, std::string& path );
