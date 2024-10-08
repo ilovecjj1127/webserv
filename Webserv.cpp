@@ -69,6 +69,49 @@ void Webserv::_printConfig( void ) const {
 	std::cout << "_______" << "\033[0m" << std::endl;
 }
 
+// remove deading and tailing spaces from le
+std::string trim( const std::string& str ) {
+	size_t start = str.find_first_not_of(" \t\n\r\f\v-");
+	size_t end = str.find_last_not_of(" \t\n\r\f\v");
+	return str.substr(start, end - start + 1);
+}
+
+void Webserv::_parseServerData( std::ifstream& file ) {
+	std::string line;
+	ServerData server;
+	while (std::getline(file, line)) {
+		if ()
+	}
+	if ()
+	_servers.push_back(server);
+}
+
+enum ParseStatus {
+	NEW,
+	SERVER,
+	LOCATION,
+}
+
+void Webserv::_parseConfigFile( const std::string& config_path ) {
+	std::ifstream file(config_path);
+	ParseStatus status = NEW;
+	ServerData 
+	if (!file.is_open()) {
+		logger.warning("Failed to open config file: ");
+	}
+
+	std::string line;
+	while (std::getline(file, line)) {
+		std::string key;
+		std::istringstream direc_stream(line);
+
+		if (line.find("server:")) {
+			if (status != NEW)
+		}
+
+	}
+}
+
 void Webserv::_fakeConfigParser( void ) {
 	ServerData server1;
 	std::pair<uint32_t, uint16_t> listen_pair1(0, 8081);

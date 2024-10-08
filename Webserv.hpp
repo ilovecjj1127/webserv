@@ -97,6 +97,8 @@ private:
 	void _getTargetServer(int client_fd, const std::string& host);
 	void _sortLocationByPath( void );
 	void _printConfig( void ) const;
+	void _parseConfigFile( const std::string& config_path );
+	void _parseServerData( std::ifstream& file );
 
 	// WebservCgi.cpp
 	int _executeCgi( int client_fd, std::string& path );
