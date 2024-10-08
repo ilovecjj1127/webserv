@@ -27,7 +27,6 @@ Webserv::Webserv( void ) {
 	_event_array_size = 16;
 	_chunk_size = 4096;
 	_timeout_period = 5;
-	_error_page_404 = "/404.html";
 	_chunk_size = 4096;
 	_timeout_period = 5;
 }
@@ -166,7 +165,7 @@ void Webserv::_checkTimeouts( void ) {
 			} else {
 				logger.debug("CGI timeout for client_fd " + std::to_string(client_fd));
 				client_data.last_activity = time(nullptr);
-				client_data.response = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 25\r\n\r\n500 Internal Server Error";
+				_prepareResponseError(client_data, 500);
 				_modifyEpollSocketOut(client_fd);
 				return _closeCgiPipe(client_data.cgi.fd_in, client_data.cgi, nullptr);
 			}
@@ -204,7 +203,7 @@ void Webserv::_generateDirectoryList( const std::string &dir_path, int client_fd
 
 	DIR *dir = opendir(dir_path.c_str());
 	if (dir == nullptr) {
-		response = "HTTP/1.1 403 Forbidden\r\nContent-Length: 13\r\n\r\n403 Forbidden";
+		_prepareResponseError(_clients_map[client_fd], 403);
 		logger.warning("Failed to open directory" + dir_path);
 		return;
 	}
@@ -252,7 +251,7 @@ int Webserv::_prepareResponse( int client_fd, const std::string& file_path, size
 		if (_clients_map[client_fd].location->autoindex) {
 			_generateDirectoryList(full_path, client_fd);
 		} else {
-			response = "HTTP/1.1 403 Forbidden\r\nContent-Length: 13\r\n\r\n403 Forbidden";
+			_prepareResponseError(_clients_map[client_fd], 403);
 		}
 		return 1;
 	}
@@ -261,17 +260,14 @@ int Webserv::_prepareResponse( int client_fd, const std::string& file_path, size
 		if (access(full_path.c_str(), F_OK) == 0) {
 		 	return _executeCgi(client_fd, full_path);
 		} else {
-			return _prepareResponse(client_fd, _error_page_404, 404);
+			_prepareResponseError(_clients_map[client_fd], 404);
+			return 1;
 		}
 	}
 	std::ifstream file(full_path);
-	if (!file.is_open() && file_path != _error_page_404) {
+	if (isDirectory(full_path) || !file.is_open()) {
 		logger.warning("Failed to open file: " + full_path);
-		return _prepareResponse(client_fd, _error_page_404, 404);
-	} else if (isDirectory(full_path) || !file.is_open()) {
-		logger.warning("Failed to open file: " + full_path);
-		std::string page404 = "HTTP/1.1 404 Not Found\r\nContent-Length: 13\r\n\r\n404 Not Found";
-		response = page404;
+		_prepareResponseError(_clients_map[client_fd], 404);
 		return 1;
 	}
 	std::stringstream buffer;
@@ -281,17 +277,22 @@ int Webserv::_prepareResponse( int client_fd, const std::string& file_path, size
 	return 1;
 }
 
-int Webserv::_prepareResponseError( ClientData& client_data, size_t status_code ) {
-	std::string filepath = _getErrorPagePath(client_data.location->error_pages, status_code);
+void Webserv::_prepareResponseError( ClientData& client_data, size_t status_code ) {
+	std::string filepath;
+	if (client_data.location == nullptr) {
+		filepath = "";
+	} else {
+		filepath = _getErrorPagePath(client_data.location->error_pages, status_code);
+	}
 	if (!filepath.empty() && _saveResponsePage(client_data, filepath, status_code) == 0) {
-		return 0;
+		return;
 	}
 	filepath = _getErrorPagePath(client_data.server->error_pages, status_code);
 	if (!filepath.empty() && _saveResponsePage(client_data, filepath, status_code) == 0) {
-		return 0;
+		return;
 	}
 	filepath = _getErrorPagePath(_error_pages, status_code);
-	return _saveResponsePage(client_data, filepath, status_code);
+	_saveResponsePage(client_data, filepath, status_code);
 }
 
 std::string Webserv::_getErrorPagePath(const std::unordered_map<int, std::string>& error_pages, size_t status_code) {

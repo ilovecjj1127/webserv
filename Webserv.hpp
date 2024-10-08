@@ -80,7 +80,6 @@ private:
 	bool _keep_running;
 	int _epoll_fd;
 	size_t _event_array_size;
-	std::string _error_page_404;
 	std::vector<ServerData> _servers;
 	std::unordered_map<int, ClientData> _clients_map;
 	std::unordered_map<int, int> _pipe_map;
@@ -97,7 +96,7 @@ private:
 	void _generateDirectoryList( const std::string &dir_path, int client_fd );
 	void _fakeConfigParser( void );
 	void _getTargetServer(int client_fd, const std::string& host);
-	int _prepareResponseError( ClientData& client_data, size_t status_code );
+	void _prepareResponseError( ClientData& client_data, size_t status_code );
 	std::string _getErrorPagePath(const std::unordered_map<int, std::string>& error_pages, size_t status_code);
 	int _saveResponsePage( ClientData& client_data, std::string& filepath, int status_code );
 	void _sortLocationByPath( void );

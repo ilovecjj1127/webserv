@@ -39,8 +39,7 @@ int Webserv::_endCgi( int fd_res[2], int fd_body[2], int client_fd ) {
 	if (fd_body[1]) {
 		close(fd_body[1]);
 	}
-	std::string& response = _clients_map[client_fd].response;
-	response = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 25\r\n\r\n500 Internal Server Error";
+	_prepareResponseError(_clients_map[client_fd], 500);
 	return 1;
 }
 
@@ -87,7 +86,7 @@ void Webserv::_connectCgi( int client_fd, int fd_in, int fd_out) {
 		event.events = EPOLLOUT;
 		event.data.fd = fd_out;
 		if (epoll_ctl(_epoll_fd, EPOLL_CTL_ADD, fd_out, &event) == -1) {
-			_clients_map[client_fd].response = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 25\r\n\r\n500 Internal Server Error";
+			_prepareResponseError(_clients_map[client_fd], 500);
 			_modifyEpollSocketOut(client_fd);
 			close(fd_in);
 			return _closeCgiPipe(fd_out, cgi, "Failed to add cgi.fd_out to epoll: ");
@@ -101,7 +100,7 @@ void Webserv::_connectCgi( int client_fd, int fd_in, int fd_out) {
 	event.events = EPOLLIN | EPOLLHUP;
 	event.data.fd = fd_in;
 	if (epoll_ctl(_epoll_fd, EPOLL_CTL_ADD, fd_in, &event) == -1) {
-		_clients_map[client_fd].response = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 25\r\n\r\n500 Internal Server Error";
+		_prepareResponseError(_clients_map[client_fd], 500);
 		_modifyEpollSocketOut(client_fd);
 		return _closeCgiPipe(fd_in, cgi, "Failed to add cgi.fd_in to epoll: ");
 	}

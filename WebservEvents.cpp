@@ -95,7 +95,7 @@ int Webserv::_getTargetLocation( int client_fd ) {
 		}
 	}
 	if (_clients_map[client_fd].location == nullptr) {
-		_clients_map[client_fd].response = "HTTP/1.1 404 Not Found\r\nContent-Length: 13\r\n\r\n404 Not Found";
+		_prepareResponseError(_clients_map[client_fd], 404);
 		_modifyEpollSocketOut(client_fd);
 	}
 	return 1;
@@ -108,13 +108,13 @@ int Webserv::_checkRequestValid( const Request& request, int client_fd ) {
 	Location& location = *(_clients_map[client_fd].location);
 	std::string& response = _clients_map[client_fd].response;
 	if (methods.find(request.method) == methods.end()) {
-		response = "HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 22\r\n\r\n405 Method Not Allowed";
+		_prepareResponseError(_clients_map[client_fd], 405);
 		_modifyEpollSocketOut(client_fd);
 		return 1;
 	}
 	if (request.content_length > _clients_map[client_fd].location->client_max_body_size
 		 || request.content_length > _clients_map[client_fd].server->client_max_body_size) {
-		response = "HTTP/1.1 413 Request Entity Too Large\r\nContent-Length: 28\r\n\r\n413 Request Entity Too Large";
+		_prepareResponseError(_clients_map[client_fd], 413);
 		_modifyEpollSocketOut(client_fd);
 		return 1;
 	}
@@ -172,7 +172,7 @@ void Webserv::_sendCgiRequest( int fd_out ) {
 	ssize_t bytes = write(fd_out, chunk.data(), chunk_size);
 	client_data.last_activity = time(nullptr);
 	if (bytes < 0) {
-		client_data.response = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 25\r\n\r\n500 Internal Server Error";
+		_prepareResponseError(client_data, 500);
 		_modifyEpollSocketOut(client_fd);
 		return _closeCgiPipe(client_data.cgi.fd_in, client_data.cgi, "write pipe: ");
 	}
@@ -189,7 +189,7 @@ void Webserv::_getCgiResponse( int fd_in ) {
 	client_data.last_activity = time(nullptr);
 	logger.info("bytes read from pipe: " + std::to_string(bytes));
 	if (bytes < 0) {
-		response = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 25\r\n\r\n500 Internal Server Error";
+		_prepareResponseError(client_data, 500);
 		_modifyEpollSocketOut(client_fd);
 		return _closeCgiPipe(fd_in, client_data.cgi, "read pipe: ");
 	} else if (bytes > 0) {
