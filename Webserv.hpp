@@ -99,6 +99,9 @@ private:
 	void _generateDirectoryList( const std::string &dir_path, int client_fd );
 	void _fakeConfigParser( void );
 	void _getTargetServer(int client_fd, const std::string& host);
+	int _prepareResponseError( ClientData& client_data, size_t status_code );
+	std::string _getErrorPagePath(const std::unordered_map<int, std::string>& error_pages, size_t status_code);
+	int _saveResponsePage( ClientData& client_data, std::string& filepath, int status_code );
 
 	// WebservCgi.cpp
 	int _executeCgi( int client_fd, std::string& path );

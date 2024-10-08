@@ -220,13 +220,46 @@ int Webserv::_prepareResponse( int client_fd, const std::string& file_path, size
 	return 1;
 }
 
+int Webserv::_prepareResponseError( ClientData& client_data, size_t status_code ) {
+	std::string filepath = _getErrorPagePath(client_data.location->error_pages, status_code);
+	if (!filepath.empty() && _saveResponsePage(client_data, filepath, status_code) == 0) {
+		return 0;
+	}
+	filepath = _getErrorPagePath(client_data.server->error_pages, status_code);
+	if (!filepath.empty() && _saveResponsePage(client_data, filepath, status_code) == 0) {
+		return 0;
+	}
+	filepath = _getErrorPagePath(_error_pages, status_code);
+	return _saveResponsePage(client_data, filepath, status_code);
+}
+
+std::string Webserv::_getErrorPagePath(const std::unordered_map<int, std::string>& error_pages, size_t status_code) {
+	if (error_pages.find(status_code) == error_pages.end()) {
+		return "";
+	}
+	const std::string& filepath = error_pages.at(status_code);
+	if (access(filepath.c_str(), R_OK) == 0 && isDirectory(filepath) == 0) {
+		return filepath;
+	}
+	return "";
+}
+
+int Webserv::_saveResponsePage( ClientData& client_data, std::string& filepath, int status_code ) {
+	std::ifstream file(filepath);
+	if (!file.is_open()) {
+		return 1;
+	}
+	std::stringstream buffer;
+	buffer << file.rdbuf();
+	std::string& response = client_data.response;
+	response = buffer.str();
+	response = _getHtmlHeader(response.size(), status_code) + response;
+	return 0;
+}
+
 std::string Webserv::_getHtmlHeader( size_t content_length, size_t status_code ) {
 	std::string header = "HTTP/1.1 ";
-	if (status_code == 404) {
-		header += "404 Not Found\r\n";
-	} else {
-		header += "200 OK\r\n";
-	}
+	header += _response_codes.at(status_code) + "\r\n";
 	header += "Content-Type: text/html\r\n";
 	header += "Content-Length: " + std::to_string(content_length) + "\r\n\r\n";
 	return header;
