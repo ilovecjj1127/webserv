@@ -10,14 +10,9 @@ Webserv::Webserv( void ) {
 	_event_array_size = 16;
 	_chunk_size = 4096;
 	_timeout_period = 5;
-	_root_path = "./nginx_example/html";
-	_index_page = "/index.html";
-	// _location("/", _root_path, _index_page, false, {POST, DELETE});
 	_error_page_404 = "/404.html";
 	_chunk_size = 4096;
 	_timeout_period = 5;
-	_client_max_body_size = 4096;
-
 }
 
 Webserv::~Webserv( void ) {
@@ -44,17 +39,77 @@ void Webserv::_stopServer( void ) {
 	}
 }
 
+void Webserv::_sortLocationByPath( void ) {
+	for (ServerData& server : _servers) {
+		std::vector<Location>& locations = server.locations;
+		std::sort(locations.begin(), locations.end(),
+				[](const Location& a, const Location& b) {
+					return a.path.size() > b.path.size();  // Sort by path length (longest first)
+				});
+	}
+}
+
+void Webserv::_printConfig( void ) const {
+	std::cout << "\033[36m" << "_______\nCONFIG" << std::endl;
+	for (const ServerData& server : _servers) {
+		for (const auto& [ip_address, port] : server.listen_group) {
+			std::cout << "\nListen at: " << ip_address << ":" << port << std::endl;
+		}
+		for (const std::string& server_name : server.server_names) {
+			std::cout << "Server Name: " <<  server_name << std::endl;
+		}
+		for (const Location& location : server.locations) {
+			std::cout << "Location:\n\tpath: " << location.path << std::endl;
+			if (!location.root.empty()) std::cout << "\talias: " << location.root << std::endl;
+			if (!location.index_page.empty()) std::cout << "\tindex: " << location.index_page << std::endl;
+			if (!location.redirect_path.empty()) std::cout << "\tredirect_path: " << location.redirect_path << std::endl;
+			std::cout << "\tautoindex: " << location.autoindex << std::endl;
+		}
+	}
+	std::cout << "_______" << "\033[0m" << std::endl;
+}
+
 void Webserv::_fakeConfigParser( void ) {
 	ServerData server1;
 	std::pair<uint32_t, uint16_t> listen_pair1(0, 8081);
 	server1.listen_group.push_back(listen_pair1);
+	
+	Location location1;
+	location1.path = "/";
+	location1.root = "./nginx_example/html";
+	location1.index_page = "index.html";
+	location1.autoindex = true;
+	server1.locations.push_back(location1);
+
+	Location location2;
+	location2.path = "/askme";
+	location2.redirect_path = "https://www.google.com/";
+	location2.redirect_code = 301;
+	server1.locations.push_back(location2);
+
+	Location location3;
+	location3.path = "/cgi";
+	location3.root = "./nginx_example/cgi";
+	location3.autoindex = true;
+	server1.locations.push_back(location3);
+	
 	_servers.push_back(server1);
 
 	ServerData server2;
 	std::pair<uint32_t, uint16_t> listen_pair2(0, 8082);
 	server2.listen_group.push_back(listen_pair2);
 	server2.server_names.push_back("localhost");
+
+	Location location4;
+	location4.path = "/cgi";
+	location4.root = "./nginx_example/cgi";
+	location4.client_max_body_size = 10;
+	server2.locations.push_back(location4);
+
 	_servers.push_back(server2);
+
+	_sortLocationByPath();
+	_printConfig();
 }
 
 void Webserv::_mainLoop( void ) {
@@ -62,7 +117,7 @@ void Webserv::_mainLoop( void ) {
 	time_t last_timeout_check = time(nullptr);
 	while (_keep_running) {
 		int n = epoll_wait(_epoll_fd, events, _event_array_size, _timeout_period * 1000);
-		// logger.debug("Epoll got events: " + std::to_string(n));
+		logger.debug("Epoll got events: " + std::to_string(n));
 		if (n == -1) {
 			if (_keep_running) perror("epoll_wait");
 			break;
@@ -122,7 +177,6 @@ std::string getModTime( const std::string& path ) {
 	return "Unknown";
 }
 
-//#include <dirent.h>
 void Webserv::_generateDirectoryList( const std::string &dir_path, int client_fd ) {
 	std::ostringstream html;
 	std::string name, full_path, size, mod_time;
@@ -133,7 +187,7 @@ void Webserv::_generateDirectoryList( const std::string &dir_path, int client_fd
 
 	DIR *dir = opendir(dir_path.c_str());
 	if (dir == nullptr) {
-		response = "HTTP/1.1 403 Forbidden\r\n\r\nContent-Length: 13\r\n\r\n403 Forbidden";
+		response = "HTTP/1.1 403 Forbidden\r\nContent-Length: 13\r\n\r\n403 Forbidden";
 		logger.warning("Failed to open directory" + dir_path);
 		return;
 	}
@@ -164,24 +218,31 @@ void Webserv::_generateDirectoryList( const std::string &dir_path, int client_fd
 	response += std::to_string(html.str().size())+ "\r\n\r\n" + html.str();
 }
 
+
+// ngnix: "index /index.html" works same as "index index.html" 
+// ngnix: all error response 404 error page. if not found error page, response 403 forbidden?
 int Webserv::_prepareResponse( int client_fd, const std::string& file_path, size_t status_code ) {
 	std::string& response = _clients_map[client_fd].response;
-	std::string full_path = _root_path + file_path;
-	if (file_path == "/" && access((_root_path + _index_page).c_str(), F_OK) == 0) { // only if there is index_page
-		return _prepareResponse(client_fd, _index_page, 200);
-	} else if (full_path.back() == '/' && isDirectory(full_path)) {
-		if (_location.autoindex) {
+	std::string& root_path = _clients_map[client_fd].location->root;
+	std::string full_path = root_path + file_path;
+	if (file_path == _clients_map[client_fd].location->path && !_clients_map[client_fd].location->index_page.empty()) {
+		std::string index_page = "/" + _clients_map[client_fd].location->index_page;
+		if (access((root_path + index_page).c_str(), F_OK) == 0) {
+			return _prepareResponse(client_fd, index_page, 200);
+		}
+	}
+	if (full_path.back() == '/' && isDirectory(full_path)) {
+		if (_clients_map[client_fd].location->autoindex) {
 			_generateDirectoryList(full_path, client_fd);
 		} else {
-			response = "HTTP/1.1 403 Forbidden\r\n\r\nContent-Length: 13\r\n\r\n403 Forbidden";
+			response = "HTTP/1.1 403 Forbidden\r\nContent-Length: 13\r\n\r\n403 Forbidden";
 		}
 		return 1;
 	}
 	if (full_path.substr(full_path.size() - 3) == ".py") {
-		std::string cgi_file = "./nginx_example" + file_path;
-		logger.info("CGI file: " + cgi_file);
-		if (access(cgi_file.c_str(), F_OK) == 0) {
-		 	return _executeCgi(client_fd, cgi_file);
+		logger.info("CGI file: " + full_path);
+		if (access(full_path.c_str(), F_OK) == 0) {
+		 	return _executeCgi(client_fd, full_path);
 		} else {
 			return _prepareResponse(client_fd, _error_page_404, 404);
 		}

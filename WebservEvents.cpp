@@ -66,7 +66,7 @@ int Webserv::_getClientRequest( int client_fd ) {
 		request.status = request.parseRequest();
 		_getTargetServer(client_fd, request.headers["Host"]);
 		if (request.status != INVALID) {
-			// if (_getTargetLocation(client_fd)) return 4;
+			if (_getTargetLocation(client_fd)) return 4;
 			if (_checkRequestValid(request, client_fd)) return 3;
 		}
 	} else if (request.status == FULL_HEADER) {
@@ -85,14 +85,12 @@ int Webserv::_getClientRequest( int client_fd ) {
 int Webserv::_getTargetLocation( int client_fd ) {
 	std::vector<Location>& locations = _clients_map[client_fd].server->locations;
 	std::string& path = _clients_map[client_fd].request.path;
-
-	std::sort(locations.begin(), locations.end(),
-			 [](const Location& a, const Location& b) {
-				return a.path.size() > b.path.size();  // Sort by path length (longest first)
-			 });
 	for (auto& location : locations) {
 		if (path.compare(0, location.path.size(), location.path) == 0) {
 			_clients_map[client_fd].location = &location;
+			path.erase(0, location.path.size());
+			if (path.front() != '/') path.insert(0, 1, '/');
+			logger.info("Found Path: " + location.path);
 			return 0;
 		}
 	}
@@ -106,14 +104,28 @@ int Webserv::_getTargetLocation( int client_fd ) {
 // check for allowed_method and client_max_body size
 // _clients_map[client_fd].location
 int Webserv::_checkRequestValid( const Request& request, int client_fd ) {
-	std::set<Method>& methods = _location.allowed_methods;
+	std::set<Method>& methods = _clients_map[client_fd].location->allowed_methods;
+	Location& location = *(_clients_map[client_fd].location);
+	std::string& response = _clients_map[client_fd].response;
 	if (methods.find(request.method) == methods.end()) {
-		_clients_map[client_fd].response = "HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 22\r\n\r\n405 Method Not Allowed";
+		response = "HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 22\r\n\r\n405 Method Not Allowed";
 		_modifyEpollSocketOut(client_fd);
 		return 1;
 	}
-	if (request.content_length > _client_max_body_size) {
-		_clients_map[client_fd].response = "HTTP/1.1 413 Request Entity Too Large\r\nContent-Length: 28\r\n\r\n413 Request Entity Too Large";
+	if (request.content_length > _clients_map[client_fd].location->client_max_body_size
+		 || request.content_length > _clients_map[client_fd].server->client_max_body_size) {
+		response = "HTTP/1.1 413 Request Entity Too Large\r\nContent-Length: 28\r\n\r\n413 Request Entity Too Large";
+		_modifyEpollSocketOut(client_fd);
+		return 1;
+	}
+	if (!location.redirect_path.empty()) {
+		response = "HTTP/1.1 " + std::to_string(location.redirect_code) + " ";
+		if (location.redirect_code == 301 ) {
+			response += "Moved Permanently\r\n";
+		} else if (location.redirect_code == 302) {
+			response += "Found\r\n";
+		}
+		response += "Location: " + location.redirect_path + "\r\nContent-Length: 0\r\n\r\n";
 		_modifyEpollSocketOut(client_fd);
 		return 1;
 	}
