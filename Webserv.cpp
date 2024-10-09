@@ -76,40 +76,102 @@ std::string trim( const std::string& str ) {
 	return str.substr(start, end - start + 1);
 }
 
-void Webserv::_parseServerData( std::ifstream& file ) {
-	std::string line;
-	ServerData server;
-	while (std::getline(file, line)) {
-		if ()
-	}
-	if ()
-	_servers.push_back(server);
-}
-
 enum ParseStatus {
 	NEW,
 	SERVER,
 	LOCATION,
 }
 
+int _getIndentation( const std::string& line ) {
+	int indentation = 0;
+	for (char c : line) {
+		if (c == ' ') {
+			++indentation;
+		} else if (c == '\t') {
+			indentation += 4;
+		} else {
+			break;
+		}
+	}
+	return indentation;
+}
+
+void Webserv::_parseServerData( ServerData& server, const std::string& line ) {
+	
+}
+
+void Webserv::_parseLocation( Location& location, const std::string& line ) {
+	if (line.find("root") != std::string::npos) {
+		location.root = trim(line.substr(line.find(":") + 1));
+	} else if (line.find("index") != std::string::npos) {
+
+	} else if (line.find("autoindex") != std::string::npos) {
+		
+	} else if (line.find("client_max_body_size") != std::string::npos) {
+
+	} else if (line.find("error_page") != std::string::npos) {
+
+	} else if (line.find("rewrite") != std::string::npos) {
+
+	} else if (line.find("limit_except") != std::string::npos) {
+
+	}
+}
+
+void Webserv::_checkParamsPriority( ServerData& server ) {
+	
+}
+
+// if wrong identation check needed?
 void Webserv::_parseConfigFile( const std::string& config_path ) {
 	std::ifstream file(config_path);
-	ParseStatus status = NEW;
-	ServerData 
 	if (!file.is_open()) {
 		logger.warning("Failed to open config file: ");
 	}
 
 	std::string line;
+	ParseStatus status = NEW;
+	ServerData server;
+	Location location;
+	int pre_indentation = 0;
+
 	while (std::getline(file, line)) {
-		std::string key;
-		std::istringstream direc_stream(line);
+		int curr_indentation = _getIndentation(line);
 
-		if (line.find("server:")) {
-			if (status != NEW)
+		if (line.find("server:") != std::string::npos) {
+			if (status != NEW) { // not the first server
+				_checkParamsPriority(server); //replace varible in location
+				_servers.push_back(server);
+				server = ServerData();
+			}
+			status = SERVER;
+		} else if (line.find("location") != std::string::npos) {
+			size_t delimiter1 = line.find('/');
+			size_t delimiter2 = line.find(':');
+			if (delimiter1 == std::string::npos || delimiter2 == std::string::npos) {
+				logger.warning("Invalid location line: " + line);
+				continue;
+			}
+			location.path = line.substr(delimiter1 - 1).erase(delimiter2);
+			status = LOCATION;
+		} else if (status == SERVER) {
+			_parseServerData(server, line);
+		} else if (status == LOCATION) {
+			if (curr_indentation >= pre_indentation) {
+				_parseLocation(location, line);
+			} else {
+				server.locations.push_back(location);
+				location = Location();
+				status = SERVER;
+			}
 		}
-
+		pre_indentation = curr_indentation;
 	}
+	if (status == LOCATION) {
+		server.locations.push_back(location);
+	}
+	_checkParamsPriority(server);
+	_servers.push_back(server);
 }
 
 void Webserv::_fakeConfigParser( void ) {

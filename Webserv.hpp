@@ -7,6 +7,7 @@
 #include <cstring>
 #include <csignal>
 #include <ctime>
+#include <cstddef>
 #include <fcntl.h>
 #include <sys/epoll.h>
 #include <sys/socket.h>
@@ -41,7 +42,7 @@ struct Location {
 	size_t									client_max_body_size = 1048576;
 	std::set<Method>						allowed_methods = {GET, POST, DELETE};
 	std::unordered_map<int, std::string>	error_pages;
-	std::string								redirect_path = "";
+	std::string								redirect_path;
 	int										redirect_code;
 };
 
@@ -50,8 +51,8 @@ struct ServerData {
 	std::vector<std::string>					server_names;
 	std::vector<Location>						locations;
 	std::string 								index_page;
-	bool										autoindex = false;
-	size_t										client_max_body_size = 1048576;
+	int											autoindex = -1;
+	size_t										client_max_body_size = SIZE_MAX;
 	std::unordered_map<int, std::string>		error_pages;
 };
 
@@ -93,12 +94,16 @@ private:
 	std::string _getHtmlHeader( size_t content_length, size_t status_code );
 	int _prepareResponse( int client_fd, const std::string& file_path, size_t status_code = 200 );
 	void _generateDirectoryList( const std::string &dir_path, int client_fd );
-	void _fakeConfigParser( void );
 	void _getTargetServer(int client_fd, const std::string& host);
+
+	// WebservConfig.cpp
+	void _fakeConfigParser( void );
 	void _sortLocationByPath( void );
 	void _printConfig( void ) const;
 	void _parseConfigFile( const std::string& config_path );
-	void _parseServerData( std::ifstream& file );
+	void _parseServerData( ServerData& server, const std::string& line );
+	void _parseLocation( Location& location, const std::string& line );
+	void _checkParamsPriority( ServerData& server )
 
 	// WebservCgi.cpp
 	int _executeCgi( int client_fd, std::string& path );
