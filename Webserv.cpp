@@ -235,6 +235,10 @@ void Webserv::_parseConfigFile( const std::string& config_path ) {
 		int curr_indentation = _getIndentation(line);
 
 		if (line.find("server:") != std::string::npos) {
+			if (location.path != "") {
+				server.locations.push_back(location);
+				location = Location();
+			}
 			if (status != START) { // not the first server
 				// _checkParamsPriority(server); //replace varible in location
 				_servers.push_back(server);

@@ -112,8 +112,7 @@ int Webserv::_checkRequestValid( const Request& request, int client_fd ) {
 		_modifyEpollSocketOut(client_fd);
 		return 1;
 	}
-	if (request.content_length > _clients_map[client_fd].location->client_max_body_size
-		 || request.content_length > _clients_map[client_fd].server->client_max_body_size) {
+	if (request.content_length > _clients_map[client_fd].location->client_max_body_size) {
 		response = "HTTP/1.1 413 Request Entity Too Large\r\nContent-Length: 28\r\n\r\n413 Request Entity Too Large";
 		_modifyEpollSocketOut(client_fd);
 		return 1;
