@@ -15,6 +15,7 @@
 #include <sys/wait.h>
 #include <sys/stat.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
 #include <unistd.h>
 #include <list>
 #include <set>
@@ -42,8 +43,8 @@ struct Location {
 	size_t									client_max_body_size = 1048576;
 	std::set<Method>						allowed_methods = {GET, POST, DELETE};
 	std::unordered_map<int, std::string>	error_pages;
-	std::string								redirect_path;
-	int										redirect_code;
+	std::string								redirect_path = "";
+	int										redirect_code = 0;
 };
 
 struct ServerData {
@@ -103,7 +104,7 @@ private:
 	void _parseConfigFile( const std::string& config_path );
 	void _parseServerData( ServerData& server, const std::string& line );
 	void _parseLocation( Location& location, const std::string& line );
-	void _checkParamsPriority( ServerData& server )
+	void _checkParamsPriority( ServerData& server );
 
 	// WebservCgi.cpp
 	int _executeCgi( int client_fd, std::string& path );

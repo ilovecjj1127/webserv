@@ -24,7 +24,8 @@ Webserv& Webserv::getInstance( void ) {
 }
 
 int Webserv::startServer( void ) {
-	_fakeConfigParser();
+	_parseConfigFile("default.conf");
+	// _fakeConfigParser();
 	if (_initWebserv() != 0) {
 		return 1;
 	}
@@ -58,12 +59,27 @@ void Webserv::_printConfig( void ) const {
 		for (const std::string& server_name : server.server_names) {
 			std::cout << "Server Name: " <<  server_name << std::endl;
 		}
+		for (const auto& [error_code, error_page] : server.error_pages) {
+			std::cout << "\terror_page: " << error_code << " " << error_page << std::endl;
+		}
 		for (const Location& location : server.locations) {
 			std::cout << "Location:\n\tpath: " << location.path << std::endl;
-			if (!location.root.empty()) std::cout << "\talias: " << location.root << std::endl;
-			if (!location.index_page.empty()) std::cout << "\tindex: " << location.index_page << std::endl;
-			if (!location.redirect_path.empty()) std::cout << "\tredirect_path: " << location.redirect_path << std::endl;
+			std::cout << "\troot: " << location.root << std::endl;
+			std::cout << "\tindex: " << location.index_page << std::endl;
+			std::cout << "\tredirect_path: " << location.redirect_code << " " << location.redirect_path << std::endl;
 			std::cout << "\tautoindex: " << location.autoindex << std::endl;
+			std::cout << "\tclient_max_body_size: " << location.client_max_body_size << std::endl;
+			for (const auto& [error_code, error_page] : location.error_pages) {
+				std::cout << "\terror_page: " << error_code << " " << error_page << std::endl;
+			}
+			std::unordered_map<Method, std::string> methods_map = {
+				{GET, "GET"},
+				{POST, "POST"},
+				{DELETE, "DELETE"}
+			};
+			std::cout << "\tallowed_methods:";
+			for (const Method& method : location.allowed_methods) std::cout << " " << methods_map[method];
+			std::cout << std::endl;
 		}
 	}
 	std::cout << "_______" << "\033[0m" << std::endl;
@@ -77,10 +93,10 @@ std::string trim( const std::string& str ) {
 }
 
 enum ParseStatus {
-	NEW,
+	START,
 	SERVER,
 	LOCATION,
-}
+};
 
 int _getIndentation( const std::string& line ) {
 	int indentation = 0;
@@ -96,30 +112,109 @@ int _getIndentation( const std::string& line ) {
 	return indentation;
 }
 
-void Webserv::_parseServerData( ServerData& server, const std::string& line ) {
-	
+uint32_t _ipStringToDecimal( const std::string& ip_address ) {
+	uint32_t result = 0;
+	std::istringstream ip_stream(ip_address);
+	std::string octet;
+	int shift = 24;
+	while (std::getline(ip_stream, octet, '.')) {
+		uint32_t octetValue = static_cast<uint32_t>(std::stoi(octet));
+		result |= (octetValue << shift);
+        shift -= 8;
+	}
+	return result;
 }
 
-void Webserv::_parseLocation( Location& location, const std::string& line ) {
-	if (line.find("root") != std::string::npos) {
-		location.root = trim(line.substr(line.find(":") + 1));
-	} else if (line.find("index") != std::string::npos) {
+void Webserv::_parseServerData( ServerData& server, const std::string& line ) {
+	size_t delimiter = line.find(":");
+	if (delimiter == std::string::npos) {
+		logger.warning("Invalid server line1: " + line);
+		return;
+	}
+	std::istringstream line_stream(line.substr(delimiter + 1));
 
-	} else if (line.find("autoindex") != std::string::npos) {
+	if (line.find("listen:") != std::string::npos) {
+		uint16_t port = std::stoi(line.substr(line.find_last_of(':') + 1));
+		std::string ip_address;
+		std::getline(line_stream, ip_address, ':');
 		
-	} else if (line.find("client_max_body_size") != std::string::npos) {
+		uint32_t ip = _ipStringToDecimal(ip_address);
+		server.listen_group.push_back(std::make_pair(ip, port));
+	} else if (line.find("server_name:") != std::string::npos) {
+		std::string server_name;
+		while (line_stream >> server_name) {
+			server.server_names.push_back(server_name);
+		}
+	} else if (line.find("autoindex:") != std::string::npos) {
+		if (line.find("on") != std::string::npos) {
+			server.autoindex = 1;
+		} else if (line.find("off") != std::string::npos) {
+			server.autoindex = 0;
+		}
+	} else if (line.find("index:") != std::string::npos) {
+		line_stream >> server.index_page;
+	} else if (line.find("client_max_body_size:") != std::string::npos) {
+		line_stream >> server.client_max_body_size;
+	} else if (line.find("error_page:") != std::string::npos) { // TODO: not get error_path
+		int error_code;
+		std::string error_path;
+		while (line_stream >> error_code) {
+			server.error_pages[error_code] = "";
+		}
+		line_stream >> error_path;
+		logger.info(error_path);
+		for (auto& entry : server.error_pages) {
+			entry.second = error_path;
+		}
+	}
+}
 
-	} else if (line.find("error_page") != std::string::npos) {
+// put everything in try catch
+void Webserv::_parseLocation( Location& location, const std::string& line ) {
+	size_t delimiter = line.find(":");
+	if (delimiter == std::string::npos) {
+		logger.warning("Invalid location line2: " + line);
+		return;
+	}
+	std::istringstream line_stream(line.substr(delimiter + 1));
 
-	} else if (line.find("rewrite") != std::string::npos) {
-
-	} else if (line.find("limit_except") != std::string::npos) {
-
+	if (line.find("root:") != std::string::npos) {
+		line_stream >> location.root;
+	} else if (line.find("autoindex:") != std::string::npos && line.find("on") != std::string::npos) {
+		location.autoindex = true;
+	} else if (line.find("index:") != std::string::npos) {
+		line_stream >> location.index_page;
+	} else if (line.find("client_max_body_size:") != std::string::npos) {
+		line_stream >> location.client_max_body_size;
+	} else if (line.find("error_page:") != std::string::npos) {  // TODO: not get error_path
+		int error_code;
+		std::string error_path;
+		while (line_stream >> error_code) {
+			location.error_pages[error_code] = "";
+		}
+		line_stream >> error_path;
+		for (auto& entry : location.error_pages) {
+			entry.second = error_path;
+		}
+	} else if (line.find("rewrite:") != std::string::npos) {
+		line_stream >> location.redirect_code;
+		line_stream >> location.redirect_path;
+	} else if (line.find("limit_except:") != std::string::npos) {
+		location.allowed_methods = {};
+		std::string method;
+		std::unordered_map<std::string, Method> methods_map = {
+			{"GET", GET},
+			{"POST", POST},
+			{"DELETE", DELETE}
+		};
+		while (line_stream >> method) {
+			location.allowed_methods.insert(methods_map[method]);
+		}
 	}
 }
 
 void Webserv::_checkParamsPriority( ServerData& server ) {
-	
+	(void) server;
 }
 
 // if wrong identation check needed?
@@ -130,29 +225,34 @@ void Webserv::_parseConfigFile( const std::string& config_path ) {
 	}
 
 	std::string line;
-	ParseStatus status = NEW;
+	ParseStatus status = START;
 	ServerData server;
 	Location location;
 	int pre_indentation = 0;
 
 	while (std::getline(file, line)) {
+		if (line.find(":") == std::string::npos) continue;
 		int curr_indentation = _getIndentation(line);
 
 		if (line.find("server:") != std::string::npos) {
-			if (status != NEW) { // not the first server
-				_checkParamsPriority(server); //replace varible in location
+			if (status != START) { // not the first server
+				// _checkParamsPriority(server); //replace varible in location
 				_servers.push_back(server);
 				server = ServerData();
 			}
 			status = SERVER;
 		} else if (line.find("location") != std::string::npos) {
+			if (location.path != "") {
+				server.locations.push_back(location);
+				location = Location();
+			}
 			size_t delimiter1 = line.find('/');
 			size_t delimiter2 = line.find(':');
 			if (delimiter1 == std::string::npos || delimiter2 == std::string::npos) {
-				logger.warning("Invalid location line: " + line);
+				logger.warning("Invalid location line1: " + line);
 				continue;
 			}
-			location.path = line.substr(delimiter1 - 1).erase(delimiter2);
+			location.path = line.substr(delimiter1, delimiter2 - delimiter1);
 			status = LOCATION;
 		} else if (status == SERVER) {
 			_parseServerData(server, line);
@@ -170,8 +270,10 @@ void Webserv::_parseConfigFile( const std::string& config_path ) {
 	if (status == LOCATION) {
 		server.locations.push_back(location);
 	}
-	_checkParamsPriority(server);
+	// _checkParamsPriority(server);
 	_servers.push_back(server);
+	_sortLocationByPath();
+	_printConfig();
 }
 
 void Webserv::_fakeConfigParser( void ) {
@@ -222,7 +324,7 @@ void Webserv::_mainLoop( void ) {
 	time_t last_timeout_check = time(nullptr);
 	while (_keep_running) {
 		int n = epoll_wait(_epoll_fd, events, _event_array_size, _timeout_period * 1000);
-		logger.debug("Epoll got events: " + std::to_string(n));
+		// logger.debug("Epoll got events: " + std::to_string(n));
 		if (n == -1) {
 			if (_keep_running) perror("epoll_wait");
 			break;
