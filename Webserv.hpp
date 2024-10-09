@@ -118,6 +118,7 @@ private:
 	void _sendCgiRequest( int fd_out );
 	int _getTargetLocation( int client_fd );
 	int _checkRequestValid( const Request& request, int client_fd );
+	void _handleCgiResponse( ClientData& client_data );
 
 	// WebservInit.cpp
 	int _initWebserv( void );
@@ -130,6 +131,7 @@ private:
 	int _setNonBlocking( int fd );
 	void _closeClientFd( int client_fd, const char* err_msg );
 	void _modifyEpollSocketOut( int client_fd );
+	int _stringToInt( const std::string& str );
 
 public:
 	Webserv( const Webserv& ) = delete;

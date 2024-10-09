@@ -16,7 +16,8 @@ const std::unordered_map<int, std::string> Webserv::_error_pages = {
 	{404, "./default_pages/404.html"},
 	{405, "./default_pages/405.html"},
 	{413, "./default_pages/413.html"},
-	{500, "./default_pages/500.html"}
+	{500, "./default_pages/500.html"},
+	{0, "./default_pages/unknown.html"}
 };
 
 Webserv::Webserv( void ) {
@@ -95,6 +96,7 @@ void Webserv::_fakeConfigParser( void ) {
 	location1.root = "./nginx_example/html";
 	location1.index_page = "index.html";
 	location1.autoindex = true;
+	// location1.error_pages[404] = "./temp/404.html";
 	server1.locations.push_back(location1);
 
 	Location location2;
@@ -107,6 +109,7 @@ void Webserv::_fakeConfigParser( void ) {
 	location3.path = "/cgi";
 	location3.root = "./nginx_example/cgi";
 	location3.autoindex = true;
+	// location3.error_pages[400] = "./temp/404.html";
 	server1.locations.push_back(location3);
 	
 	_servers.push_back(server1);
@@ -278,20 +281,17 @@ int Webserv::_prepareResponse( int client_fd, const std::string& file_path, size
 }
 
 void Webserv::_prepareResponseError( ClientData& client_data, size_t status_code ) {
-	std::string filepath;
-	if (client_data.location == nullptr) {
-		filepath = "";
-	} else {
+	std::string filepath = "";
+	if (client_data.location != nullptr) {
 		filepath = _getErrorPagePath(client_data.location->error_pages, status_code);
 	}
 	if (!filepath.empty() && _saveResponsePage(client_data, filepath, status_code) == 0) {
 		return;
 	}
-	filepath = _getErrorPagePath(client_data.server->error_pages, status_code);
-	if (!filepath.empty() && _saveResponsePage(client_data, filepath, status_code) == 0) {
-		return;
-	}
 	filepath = _getErrorPagePath(_error_pages, status_code);
+	if (filepath.empty()) {
+		filepath = _error_pages.at(0);
+	}
 	_saveResponsePage(client_data, filepath, status_code);
 }
 
@@ -321,7 +321,11 @@ int Webserv::_saveResponsePage( ClientData& client_data, std::string& filepath, 
 
 std::string Webserv::_getHtmlHeader( size_t content_length, size_t status_code ) {
 	std::string header = "HTTP/1.1 ";
-	header += _response_codes.at(status_code) + "\r\n";
+	if (_response_codes.find(status_code) != _response_codes.end()) {
+		header += _response_codes.at(status_code) + "\r\n";
+	} else {
+		header += std::to_string(status_code) + "\r\n";
+	}
 	header += "Content-Type: text/html\r\n";
 	header += "Content-Length: " + std::to_string(content_length) + "\r\n\r\n";
 	return header;
