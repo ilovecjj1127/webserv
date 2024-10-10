@@ -11,7 +11,6 @@ Webserv::Webserv( void ) {
 	_chunk_size = 4096;
 	_timeout_period = 5;
 	_error_page_404 = "/404.html";
-	_chunk_size = 4096;
 	_timeout_period = 5;
 }
 
@@ -85,13 +84,6 @@ void Webserv::_printConfig( void ) const {
 	std::cout << "_______" << "\033[0m" << std::endl;
 }
 
-// remove deading and tailing spaces from le
-std::string trim( const std::string& str ) {
-	size_t start = str.find_first_not_of(" \t\n\r\f\v-");
-	size_t end = str.find_last_not_of(" \t\n\r\f\v");
-	return str.substr(start, end - start + 1);
-}
-
 enum ParseStatus {
 	START,
 	SERVER,
@@ -145,12 +137,8 @@ void Webserv::_parseServerData( ServerData& server, const std::string& line ) {
 		while (line_stream >> server_name) {
 			server.server_names.push_back(server_name);
 		}
-	} else if (line.find("autoindex:") != std::string::npos) {
-		if (line.find("on") != std::string::npos) {
-			server.autoindex = 1;
-		} else if (line.find("off") != std::string::npos) {
-			server.autoindex = 0;
-		}
+	} else if (line.find("autoindex:") != std::string::npos && line.find("on") != std::string::npos) {
+		server.autoindex = 1;
 	} else if (line.find("index:") != std::string::npos) {
 		line_stream >> server.index_page;
 	} else if (line.find("client_max_body_size:") != std::string::npos) {
@@ -161,8 +149,10 @@ void Webserv::_parseServerData( ServerData& server, const std::string& line ) {
 		while (line_stream >> error_code) {
 			server.error_pages[error_code] = "";
 		}
-		line_stream >> error_path;
-		logger.info(error_path);
+		if (line_stream.fail()) {
+			line_stream.clear();
+			line_stream >> error_path;
+		}
 		for (auto& entry : server.error_pages) {
 			entry.second = error_path;
 		}
@@ -180,8 +170,12 @@ void Webserv::_parseLocation( Location& location, const std::string& line ) {
 
 	if (line.find("root:") != std::string::npos) {
 		line_stream >> location.root;
-	} else if (line.find("autoindex:") != std::string::npos && line.find("on") != std::string::npos) {
-		location.autoindex = true;
+	} else if (line.find("autoindex:") != std::string::npos) {
+		if (line.find("on") != std::string::npos) {
+			location.autoindex = 1;
+		} else {
+			location.autoindex = 0;
+		}
 	} else if (line.find("index:") != std::string::npos) {
 		line_stream >> location.index_page;
 	} else if (line.find("client_max_body_size:") != std::string::npos) {
@@ -192,7 +186,10 @@ void Webserv::_parseLocation( Location& location, const std::string& line ) {
 		while (line_stream >> error_code) {
 			location.error_pages[error_code] = "";
 		}
-		line_stream >> error_path;
+		if (line_stream.fail()) {
+			line_stream.clear();
+			line_stream >> error_path;
+		}
 		for (auto& entry : location.error_pages) {
 			entry.second = error_path;
 		}
@@ -214,7 +211,22 @@ void Webserv::_parseLocation( Location& location, const std::string& line ) {
 }
 
 void Webserv::_checkParamsPriority( ServerData& server ) {
-	(void) server;
+	for (Location& location : server.locations) {
+		if (location.autoindex == -1) {
+			location.autoindex = server.autoindex;
+		}
+		if (location.client_max_body_size == SIZE_MAX) {
+			location.client_max_body_size = server.client_max_body_size;
+		}
+		if (location.index_page.empty()) {
+			location.index_page = server.index_page;
+		}
+		for (auto& [code, path] : server.error_pages) {
+			if (location.error_pages.find(code) == location.error_pages.end()) {
+				location.error_pages[code] = path;
+			}
+		}
+	}
 }
 
 // if wrong identation check needed?
@@ -240,7 +252,7 @@ void Webserv::_parseConfigFile( const std::string& config_path ) {
 				location = Location();
 			}
 			if (status != START) { // not the first server
-				// _checkParamsPriority(server); //replace varible in location
+				_checkParamsPriority(server);
 				_servers.push_back(server);
 				server = ServerData();
 			}
@@ -267,6 +279,7 @@ void Webserv::_parseConfigFile( const std::string& config_path ) {
 				server.locations.push_back(location);
 				location = Location();
 				status = SERVER;
+				_parseServerData(server, line);
 			}
 		}
 		pre_indentation = curr_indentation;
@@ -274,7 +287,7 @@ void Webserv::_parseConfigFile( const std::string& config_path ) {
 	if (status == LOCATION) {
 		server.locations.push_back(location);
 	}
-	// _checkParamsPriority(server);
+	_checkParamsPriority(server);
 	_servers.push_back(server);
 	_sortLocationByPath();
 	_printConfig();
@@ -443,7 +456,7 @@ int Webserv::_prepareResponse( int client_fd, const std::string& file_path, size
 		}
 	}
 	if (full_path.back() == '/' && isDirectory(full_path)) {
-		if (_clients_map[client_fd].location->autoindex) {
+		if (_clients_map[client_fd].location->autoindex == 1) {
 			_generateDirectoryList(full_path, client_fd);
 		} else {
 			response = "HTTP/1.1 403 Forbidden\r\nContent-Length: 13\r\n\r\n403 Forbidden";

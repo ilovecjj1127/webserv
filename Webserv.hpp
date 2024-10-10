@@ -39,8 +39,8 @@ struct Location {
 	std::string								path;
 	std::string								root;
 	std::string								index_page;
-	bool									autoindex = false;
-	size_t									client_max_body_size = 1048576;
+	int										autoindex = -1;
+	size_t									client_max_body_size = SIZE_MAX;
 	std::set<Method>						allowed_methods = {GET, POST, DELETE};
 	std::unordered_map<int, std::string>	error_pages;
 	std::string								redirect_path = "";
@@ -52,8 +52,8 @@ struct ServerData {
 	std::vector<std::string>					server_names;
 	std::vector<Location>						locations;
 	std::string 								index_page;
-	int											autoindex = -1;
-	size_t										client_max_body_size = SIZE_MAX;
+	int											autoindex = 0;
+	size_t										client_max_body_size = 1048576;
 	std::unordered_map<int, std::string>		error_pages;
 };
 
