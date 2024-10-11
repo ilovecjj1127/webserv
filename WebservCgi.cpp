@@ -1,31 +1,5 @@
 #include "Webserv.hpp"
 
-char**	computeCmd( std::string path ) {
-	char** cmds = (char **)calloc(3, sizeof(char *));
-	if (!cmds) {
-		return NULL;
-	}
-	cmds[0] = strdup("python3");
-	if (!cmds[0]) {
-		free(cmds);
-		return NULL;
-	}
-	cmds[1] = strdup(path.c_str());
-	return (cmds);
-}
-
-void free_array(char** arr) {
-	int i = -1;
-
-	if (!arr) {
-		return ;
-	}
-	while (arr[++i]) {
-		free(arr[i]);
-	}
-	free(arr);
-}
-
 int Webserv::_endCgi( int fd_res[2], int fd_body[2], int client_fd ) {
 	if (fd_res[0]) {
 		close(fd_res[0]);
@@ -60,11 +34,19 @@ int Webserv::_executeCgi( int client_fd, std::string& path ) {
 		dup2(fd_res[1], STDOUT_FILENO);
 		close(fd_res[1]);
 		close(fd_body[0]);
-		char** cmds = computeCmd(path);
-		char** envp = _createEnvp(_clients_map[client_fd].request, path);
-		execve("/usr/bin/python3", cmds, envp);
-		free_array(cmds);
-		free_array(envp);
+		std::vector<char*> cmds = {
+			const_cast<char*>("python3"),
+			const_cast<char*>(path.c_str()),
+			nullptr
+		};
+		std::vector<std::string> env_strings;
+		_createEnvs(_clients_map[client_fd].request, env_strings);
+		std::vector<char*> envp;
+		for (std::string& env : env_strings) {
+			envp.push_back(const_cast<char*>(env.c_str()));
+		}
+		envp.push_back(nullptr);
+		execve("/usr/bin/python3", cmds.data(), envp.data());
 		exit(EXIT_FAILURE);
 	}
 	_clients_map[client_fd].cgi.pid = pid;
@@ -109,8 +91,7 @@ void Webserv::_connectCgi( int client_fd, int fd_in, int fd_out) {
 }
 
 // https://datatracker.ietf.org/doc/html/rfc3875#autoid-16
-char** Webserv::_createEnvp( const Request& req, std::string& path ) {
-	(void)path;
+void Webserv::_createEnvs( const Request& req, std::vector<std::string>& env_strings ) {
 	str_map env_map(req.headers);
 	env_map["PATH_INFO"] = req.path;
 	env_map["SERVER_PROTOCOL"] = "HTTP/1.1";
@@ -130,11 +111,7 @@ char** Webserv::_createEnvp( const Request& req, std::string& path ) {
 	};
 	env_map["REQUEST_METHOD"] = methods_map[req.method];
 	// env_map["SERVER_PORT"] = std::to_string(_listen_port);
-	
-	char** envp;
 	std::string temp_str;
-	envp = (char **)calloc(env_map.size() + 1, sizeof(char *));
-	int i = 0;
 	for (const auto& it : env_map) {
 		temp_str = "";
 		for (auto& c: it.first) {
@@ -145,11 +122,8 @@ char** Webserv::_createEnvp( const Request& req, std::string& path ) {
 			}
 		}
 		temp_str +=  ("=" + it.second);
-		envp[i] = strdup(temp_str.c_str());
-		i++;
+		env_strings.push_back(temp_str);
 	}
-	envp[i] = NULL;
-	return (envp);
 }
 
 void Webserv::_closeCgiPipe( int pipe_fd, CgiData& cgi, const char* err_msg ) {

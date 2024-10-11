@@ -108,7 +108,7 @@ private:
 	int _executeCgi( int client_fd, std::string& path );
 	void _connectCgi( int client_fd, int fd_in, int fd_out);
 	int _endCgi( int fd_res[2], int fd_body[2], int client_fd );
-	char** _createEnvp( const Request& req, std::string& path );
+	void _createEnvs( const Request& req, std::vector<std::string>& env_strings );
 	void _closeCgiPipe( int pipe_fd, CgiData& cgi, const char* err_msg );
 
 	// WebservEvents.cpp
