@@ -76,6 +76,7 @@ private:
 	static Webserv _instance;
 	static const std::unordered_map<int, std::string> _response_codes;
 	static const std::unordered_map<int, std::string> _error_pages;
+	static const std::unordered_map<std::string, std::string> _mime_types;
 
 	bool _keep_running;
 	int _epoll_fd;
@@ -91,7 +92,7 @@ private:
 	void _stopServer( void );
 	void _mainLoop( void );
 	void _checkTimeouts( void );
-	std::string _getHtmlHeader( size_t content_length, size_t status_code );
+	std::string _getHtmlHeader( size_t content_length, size_t status_code, const std::string& extension );
 	int _prepareResponse( int client_fd, const std::string& file_path, size_t status_code = 200 );
 	void _generateDirectoryList( const std::string &dir_path, int client_fd );
 	void _fakeConfigParser( void );
@@ -101,6 +102,7 @@ private:
 	int _saveResponsePage( ClientData& client_data, std::string& filepath, int status_code );
 	void _sortLocationByPath( void );
 	void _printConfig( void ) const;
+	std::string _getFileExtension( const std::string& filepath );
 
 	// WebservCgi.cpp
 	int _executeCgi( int client_fd, std::string& path );

@@ -20,6 +20,20 @@ const std::unordered_map<int, std::string> Webserv::_error_pages = {
 	{0, "./default_pages/unknown.html"}
 };
 
+const std::unordered_map<std::string, std::string> Webserv::_mime_types = {
+	{"html", "text/html"},
+	{"css", "text/css"},
+	{"js", "text/javascript"},
+	{"jpg", "image/jpeg"},
+	{"jpeg", "image/jpeg"},
+	{"png", "image/png"},
+	{"ico", "image/x-icon"},
+	{"json", "application/json"},
+	{"pdf", "application/pdf"},
+	{"zip", "application/zip"},
+	{"", "text/plain"}
+};
+
 Webserv::Webserv( void ) {
 	logger.setLevel(DEBUG);
 	logger.debug("Webserv instance created");
@@ -258,9 +272,10 @@ int Webserv::_prepareResponse( int client_fd, const std::string& file_path, size
 		}
 		return 1;
 	}
-	if (full_path.substr(full_path.size() - 3) == ".py") {
+	std::string extension = _getFileExtension(file_path);
+	if (extension == "py") {
 		logger.info("CGI file: " + full_path);
-		if (access(full_path.c_str(), F_OK) == 0) {
+		if (access(full_path.c_str(), X_OK) == 0) {
 		 	return _executeCgi(client_fd, full_path);
 		} else {
 			_prepareResponseError(_clients_map[client_fd], 404);
@@ -276,7 +291,7 @@ int Webserv::_prepareResponse( int client_fd, const std::string& file_path, size
 	std::stringstream buffer;
 	buffer << file.rdbuf();
 	response = buffer.str();
-	response = _getHtmlHeader(response.size(), status_code) + response;
+	response = _getHtmlHeader(response.size(), status_code, extension) + response;
 	return 1;
 }
 
@@ -315,18 +330,33 @@ int Webserv::_saveResponsePage( ClientData& client_data, std::string& filepath, 
 	buffer << file.rdbuf();
 	std::string& response = client_data.response;
 	response = buffer.str();
-	response = _getHtmlHeader(response.size(), status_code) + response;
+	std::string extension = _getFileExtension(filepath);
+	response = _getHtmlHeader(response.size(), status_code, extension) + response;
 	return 0;
 }
 
-std::string Webserv::_getHtmlHeader( size_t content_length, size_t status_code ) {
+std::string Webserv::_getFileExtension( const std::string& filepath ) {
+	size_t pos = filepath.rfind('.');
+	if (pos == std::string::npos) {
+		return "";
+	}
+	return filepath.substr(pos + 1);
+}
+
+std::string Webserv::_getHtmlHeader( size_t content_length, size_t status_code, const std::string& extension ) {
 	std::string header = "HTTP/1.1 ";
 	if (_response_codes.find(status_code) != _response_codes.end()) {
 		header += _response_codes.at(status_code) + "\r\n";
 	} else {
 		header += std::to_string(status_code) + "\r\n";
 	}
-	header += "Content-Type: text/html\r\n";
+	std::string content_type;
+	if (_mime_types.find(extension) == _mime_types.end()) {
+		content_type = _mime_types.at("");
+	} else {
+		content_type = _mime_types.at(extension);
+	}
+	header += "Content-Type: " + content_type + "\r\n";
 	header += "Content-Length: " + std::to_string(content_length) + "\r\n\r\n";
 	return header;
 }
