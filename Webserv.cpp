@@ -58,9 +58,6 @@ void Webserv::_printConfig( void ) const {
 		for (const std::string& server_name : server.server_names) {
 			std::cout << "Server Name: " <<  server_name << std::endl;
 		}
-		for (const auto& [error_code, error_page] : server.error_pages) {
-			std::cout << "\terror_page: " << error_code << " " << error_page << std::endl;
-		}
 		for (const Location& location : server.locations) {
 			std::cout << "Location:\n\tpath: " << location.path << std::endl;
 			std::cout << "\troot: " << location.root << std::endl;
@@ -117,7 +114,7 @@ uint32_t _ipStringToDecimal( const std::string& ip_address ) {
 	return result;
 }
 
-void Webserv::_parseServerData( ServerData& server, const std::string& line ) {
+void Webserv::_parseServerData( ServerData& server, TempVar& temp_var, const std::string& line ) {
 	size_t delimiter = line.find(":");
 	if (delimiter == std::string::npos) {
 		logger.warning("Invalid server line1: " + line);
@@ -138,22 +135,22 @@ void Webserv::_parseServerData( ServerData& server, const std::string& line ) {
 			server.server_names.push_back(server_name);
 		}
 	} else if (line.find("autoindex:") != std::string::npos && line.find("on") != std::string::npos) {
-		server.autoindex = 1;
+		temp_var.autoindex = 1;
 	} else if (line.find("index:") != std::string::npos) {
-		line_stream >> server.index_page;
+		line_stream >> temp_var.index_page;
 	} else if (line.find("client_max_body_size:") != std::string::npos) {
-		line_stream >> server.client_max_body_size;
+		line_stream >> temp_var.client_max_body_size;
 	} else if (line.find("error_page:") != std::string::npos) { // TODO: not get error_path
 		int error_code;
 		std::string error_path;
 		while (line_stream >> error_code) {
-			server.error_pages[error_code] = "";
+			temp_var.error_pages[error_code] = "";
 		}
 		if (line_stream.fail()) {
 			line_stream.clear();
 			line_stream >> error_path;
 		}
-		for (auto& entry : server.error_pages) {
+		for (auto& entry : temp_var.error_pages) {
 			entry.second = error_path;
 		}
 	}
@@ -210,18 +207,18 @@ void Webserv::_parseLocation( Location& location, const std::string& line ) {
 	}
 }
 
-void Webserv::_checkParamsPriority( ServerData& server ) {
+void Webserv::_checkParamsPriority( ServerData& server, TempVar& temp_var ) {
 	for (Location& location : server.locations) {
 		if (location.autoindex == -1) {
-			location.autoindex = server.autoindex;
+			location.autoindex = temp_var.autoindex;
 		}
 		if (location.client_max_body_size == SIZE_MAX) {
-			location.client_max_body_size = server.client_max_body_size;
+			location.client_max_body_size = temp_var.client_max_body_size;
 		}
 		if (location.index_page.empty()) {
-			location.index_page = server.index_page;
+			location.index_page = temp_var.index_page;
 		}
-		for (auto& [code, path] : server.error_pages) {
+		for (auto& [code, path] : temp_var.error_pages) {
 			if (location.error_pages.find(code) == location.error_pages.end()) {
 				location.error_pages[code] = path;
 			}
@@ -240,6 +237,7 @@ void Webserv::_parseConfigFile( const std::string& config_path ) {
 	ParseStatus status = START;
 	ServerData server;
 	Location location;
+	TempVar temp_var;
 	int pre_indentation = 0;
 
 	while (std::getline(file, line)) {
@@ -252,9 +250,10 @@ void Webserv::_parseConfigFile( const std::string& config_path ) {
 				location = Location();
 			}
 			if (status != START) { // not the first server
-				_checkParamsPriority(server);
+				_checkParamsPriority(server, temp_var);
 				_servers.push_back(server);
 				server = ServerData();
+				temp_var = TempVar();
 			}
 			status = SERVER;
 		} else if (line.find("location") != std::string::npos) {
@@ -271,7 +270,7 @@ void Webserv::_parseConfigFile( const std::string& config_path ) {
 			location.path = line.substr(delimiter1, delimiter2 - delimiter1);
 			status = LOCATION;
 		} else if (status == SERVER) {
-			_parseServerData(server, line);
+			_parseServerData(server, temp_var, line);
 		} else if (status == LOCATION) {
 			if (curr_indentation >= pre_indentation) {
 				_parseLocation(location, line);
@@ -279,7 +278,7 @@ void Webserv::_parseConfigFile( const std::string& config_path ) {
 				server.locations.push_back(location);
 				location = Location();
 				status = SERVER;
-				_parseServerData(server, line);
+				_parseServerData(server, temp_var, line);
 			}
 		}
 		pre_indentation = curr_indentation;
@@ -287,7 +286,7 @@ void Webserv::_parseConfigFile( const std::string& config_path ) {
 	if (status == LOCATION) {
 		server.locations.push_back(location);
 	}
-	_checkParamsPriority(server);
+	_checkParamsPriority(server, temp_var);
 	_servers.push_back(server);
 	_sortLocationByPath();
 	_printConfig();

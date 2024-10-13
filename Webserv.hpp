@@ -51,6 +51,9 @@ struct ServerData {
 	std::vector<std::pair<uint32_t, uint16_t>>	listen_group; // <ip_address, port> pairs
 	std::vector<std::string>					server_names;
 	std::vector<Location>						locations;
+};
+
+struct TempVar {
 	std::string 								index_page;
 	int											autoindex = 0;
 	size_t										client_max_body_size = 1048576;
@@ -102,9 +105,9 @@ private:
 	void _sortLocationByPath( void );
 	void _printConfig( void ) const;
 	void _parseConfigFile( const std::string& config_path );
-	void _parseServerData( ServerData& server, const std::string& line );
+	void _parseServerData( ServerData& server, TempVar& temp_var, const std::string& line );
 	void _parseLocation( Location& location, const std::string& line );
-	void _checkParamsPriority( ServerData& server );
+	void _checkParamsPriority( ServerData& server, TempVar& temp_var );
 
 	// WebservCgi.cpp
 	int _executeCgi( int client_fd, std::string& path );
