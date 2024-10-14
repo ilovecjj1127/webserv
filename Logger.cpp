@@ -1,14 +1,11 @@
 #include "Logger.hpp"
 
+Logger Logger::_instance;
+
 Logger::Logger( Level level ) : _level(level) {}
 
-Logger::Logger( const Logger& other ) : _level(other._level) {}
-
-Logger& Logger::operator = ( const Logger& other ) {
-	if (this != &other) {
-		_level = other._level;
-	}
-	return (*this);
+Logger& Logger::getInstance( void ) {
+	return _instance;
 }
 
 Level Logger::getLevel( void ) const {

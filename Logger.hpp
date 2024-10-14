@@ -13,14 +13,18 @@ enum Level {
 
 class Logger {
 private:
+	Logger( Level level = INFO );
+	~Logger( void ) {};
+
+	static Logger _instance;
+
 	Level _level;
 
 public:
-	Logger( Level level = INFO );
-	Logger( const Logger& other );
-	~Logger( void ) {};
+	Logger( const Logger& ) = delete;
+	Logger& operator = ( const Logger& ) = delete;
 
-	Logger& operator = ( const Logger& other );
+	static Logger& getInstance( void );
 
 	Level getLevel( void ) const;
 	void setLevel( Level level );

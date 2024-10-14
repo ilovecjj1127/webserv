@@ -3,7 +3,7 @@ NAME = webserv
 OBJ_DIR = obj
 
 SOURCES = Webserv.cpp WebservInit.cpp WebservEvents.cpp WebservCgi.cpp WebservUtils.cpp \
-		  Logger.cpp Request.cpp \
+		  Logger.cpp Request.cpp Response.cpp \
 		  main.cpp 
 
 OBJECTS = $(addprefix $(OBJ_DIR)/, $(SOURCES:.cpp=.o))

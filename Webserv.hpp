@@ -24,7 +24,9 @@
 #include <algorithm>
 #include <dirent.h>
 
+#include "Location.hpp"
 #include "Logger.hpp"
+#include "Response.hpp"
 #include "Request.hpp"
 
 
@@ -33,18 +35,6 @@ struct CgiData {
 	int		client_fd = 0;
 	int		fd_in = 0;
 	int		fd_out = 0;
-};
-
-struct Location {
-	std::string								path;
-	std::string								root;
-	std::string								index_page;
-	int										autoindex = -1;
-	size_t									client_max_body_size = SIZE_MAX;
-	std::set<Method>						allowed_methods = {GET, POST, DELETE};
-	std::unordered_map<int, std::string>	error_pages;
-	std::string								redirect_path = "";
-	int										redirect_code = 0;
 };
 
 struct ServerData {
@@ -62,15 +52,13 @@ struct ConfigServerData {
 
 struct ClientData {
 	Request		request;
-	std::string	response;
-	int			response_code;
+	Response	response;
 	size_t		bytes_sent_total = 0;
 	size_t		bytes_write_total = 0;
 	time_t		last_activity;
 	CgiData		cgi;
 	int			server_fd = 0;
 	ServerData*	server = nullptr;
-	Location*	location = nullptr;
 };
 
 class Webserv {
@@ -79,19 +67,16 @@ private:
 	~Webserv( void );
 
 	static Webserv _instance;
-	static const std::unordered_map<int, std::string> _response_codes;
-	static const std::unordered_map<int, std::string> _error_pages;
-	static const std::unordered_map<std::string, std::string> _mime_types;
 
-	bool _keep_running;
-	int _epoll_fd;
-	size_t _event_array_size;
-	std::vector<ServerData> _servers;
-	std::unordered_map<int, ClientData> _clients_map;
-	std::unordered_map<int, int> _pipe_map;
-	std::unordered_map<int, std::list<ServerData*>> _server_sockets_map;
-	size_t _chunk_size;
-	int _timeout_period;
+	bool											_keep_running;
+	int												_epoll_fd;
+	size_t											_event_array_size;
+	std::vector<ServerData>							_servers;
+	std::unordered_map<int, ClientData>				_clients_map;
+	std::unordered_map<int, int>					_pipe_map;
+	std::unordered_map<int, std::list<ServerData*>>	_server_sockets_map;
+	size_t											_chunk_size;
+	int												_timeout_period;
 
 	// Webserv.cpp
 	void _stopServer( void );
@@ -151,7 +136,7 @@ public:
 	Webserv( const Webserv& ) = delete;
 	Webserv& operator = ( const Webserv& ) = delete;
 
-	Logger logger;
+	Logger& logger;
 
 	static Webserv& getInstance( void );
 	static void handleSigInt(int signum);

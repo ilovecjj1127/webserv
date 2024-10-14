@@ -2,39 +2,7 @@
 
 Webserv Webserv::_instance;
 
-const std::unordered_map<int, std::string> Webserv::_response_codes = {
-	{200, "200 OK"},
-	{403, "403 Forbidden"},
-	{404, "404 Not Found"},
-	{405, "405 Method Not Allowed"},
-	{413, "413 Request Entity Too Large"},
-	{500, "500 Internal Server Error"}
-};
-
-const std::unordered_map<int, std::string> Webserv::_error_pages = {
-	{403, "./default_pages/403.html"},
-	{404, "./default_pages/404.html"},
-	{405, "./default_pages/405.html"},
-	{413, "./default_pages/413.html"},
-	{500, "./default_pages/500.html"},
-	{0, "./default_pages/unknown.html"}
-};
-
-const std::unordered_map<std::string, std::string> Webserv::_mime_types = {
-	{"html", "text/html"},
-	{"css", "text/css"},
-	{"js", "text/javascript"},
-	{"jpg", "image/jpeg"},
-	{"jpeg", "image/jpeg"},
-	{"png", "image/png"},
-	{"ico", "image/x-icon"},
-	{"json", "application/json"},
-	{"pdf", "application/pdf"},
-	{"zip", "application/zip"},
-	{"", "text/plain"}
-};
-
-Webserv::Webserv( void ) {
+Webserv::Webserv( void ) logger(Logger::getInstance()) {
 	logger.setLevel(DEBUG);
 	logger.debug("Webserv instance created");
 	_keep_running = true;
@@ -503,9 +471,6 @@ void Webserv::_generateDirectoryList( const std::string &dir_path, int client_fd
 	response += std::to_string(html.str().size())+ "\r\n\r\n" + html.str();
 }
 
-
-// ngnix: "index /index.html" works same as "index index.html" 
-// ngnix: all error response 404 error page. if not found error page, response 403 forbidden?
 int Webserv::_prepareResponse( int client_fd, const std::string& file_path, size_t status_code ) {
 	std::string& response = _clients_map[client_fd].response;
 	std::string& root_path = _clients_map[client_fd].location->root;
