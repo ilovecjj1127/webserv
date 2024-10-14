@@ -56,7 +56,6 @@ int Webserv::startServer( void ) {
 	if (_parseConfigFile("default.conf") != 0) {
 		return 1;
 	}
-	// _fakeConfigParser();
 	if (_initWebserv() != 0) {
 		return 1;
 	}
@@ -154,6 +153,30 @@ uint32_t Webserv::_ipStringToDecimal( const std::string& ip_address ) {
 	return result;
 }
 
+int Webserv::_parseListenGroup( ServerData& server, std::istringstream& line_stream, const std::string& line ) {
+	uint32_t ip = 0;
+	try {
+		long port_value = std::stol(line.substr(line.find_last_of(':') + 1));
+		if (port_value < 1 || port_value > 65535) {
+			throw std::out_of_range("Port number out of range: " + line);
+		}
+		uint16_t port = static_cast<uint16_t>(port_value);
+		if (line.find(":") != line.find_last_of(":")) {
+			std::string ip_address;
+			std::getline(line_stream, ip_address, ':');
+			ip = _ipStringToDecimal(ip_address);
+		}
+		server.listen_group.push_back(std::make_pair(ip, port));
+	} catch (const std::invalid_argument& e) {
+		logger.error("Invalid ip:port format: " + std::string(e.what()));
+		return 1;
+	} catch (const std::out_of_range& e) {
+		logger.error("[ip:port] out of range: " + std::string(e.what()));
+		return 1;
+	}
+	return 0;
+}
+
 int Webserv::_parseServerData( ServerData& server, ConfigServerData& temp_var, const std::string& line ) {
 	size_t delimiter = line.find(":");
 	if (delimiter == std::string::npos) {
@@ -163,23 +186,7 @@ int Webserv::_parseServerData( ServerData& server, ConfigServerData& temp_var, c
 	std::istringstream line_stream(line.substr(delimiter + 1));
 
 	if (line.find("listen:") != std::string::npos) {
-		try {
-			long port_value = std::stol(line.substr(line.find_last_of(':') + 1));
-			if (port_value < 1 || port_value > 65535) {
-				throw std::out_of_range("Port number out of range: " + line);
-			}
-			uint16_t port = static_cast<uint16_t>(port_value);
-			std::string ip_address;
-			std::getline(line_stream, ip_address, ':');
-			uint32_t ip = _ipStringToDecimal(ip_address);
-			server.listen_group.push_back(std::make_pair(ip, port));
-		} catch (const std::invalid_argument& e) {
-			logger.error("Invalid ip:port format: " + std::string(e.what()));
-			return 1;
-		} catch (const std::out_of_range& e) {
-			logger.error("[ip:port] out of range: " + std::string(e.what()));
-			return 1;
-		}
+		return _parseListenGroup(server, line_stream, line);
 	} else if (line.find("server_name:") != std::string::npos) {
 		std::string server_name;
 		while (line_stream >> server_name) {
@@ -195,6 +202,10 @@ int Webserv::_parseServerData( ServerData& server, ConfigServerData& temp_var, c
 		int error_code;
 		std::string error_path;
 		while (line_stream >> error_code) {
+			if (error_code < 400 || error_code > 599) {
+				logger.error("Invalid error code: " + std::to_string(error_code));
+				return 1;
+			}
 			temp_var.error_pages[error_code] = "";
 		}
 		if (line_stream.fail()) {
@@ -204,11 +215,13 @@ int Webserv::_parseServerData( ServerData& server, ConfigServerData& temp_var, c
 		for (auto& entry : temp_var.error_pages) {
 			entry.second = error_path;
 		}
+	} else {
+		logger.error("Invalid config line: " + line);
+		return 1;
 	}
 	return 0;
 }
 
-// put everything in try catch
 int Webserv::_parseLocation( Location& location, const std::string& line ) {
 	size_t delimiter = line.find(":");
 	if (delimiter == std::string::npos) {
@@ -233,6 +246,10 @@ int Webserv::_parseLocation( Location& location, const std::string& line ) {
 		int error_code;
 		std::string error_path;
 		while (line_stream >> error_code) {
+			if (error_code < 400 || error_code > 599) {
+				logger.error("Invalid error code: " + std::to_string(error_code));
+				return 1;
+			}
 			location.error_pages[error_code] = "";
 		}
 		if (line_stream.fail()) {
@@ -261,6 +278,9 @@ int Webserv::_parseLocation( Location& location, const std::string& line ) {
 				return 1;
 			}
 		}
+	} else {
+		logger.error("invalid config line: " + line);
+		return 1;
 	}
 	return 0;
 }
@@ -284,7 +304,6 @@ void Webserv::_checkParamsPriority( ServerData& server, ConfigServerData& temp_v
 	}
 }
 
-// if wrong identation check needed?
 int Webserv::_parseConfigFile( const std::string& config_path ) {
 	std::ifstream file(config_path);
 	if (!file.is_open()) {
@@ -297,24 +316,34 @@ int Webserv::_parseConfigFile( const std::string& config_path ) {
 	ServerData server;
 	Location location;
 	ConfigServerData temp_var;
-	int pre_indentation = 0;
+	int server_indentation, location_indentation;
 
 	while (std::getline(file, line)) {
+		if (line.find('#') != std::string::npos) {
+			line = line.substr(0, line.find('#'));
+        }
 		if (line.find(":") == std::string::npos) continue;
 		int curr_indentation = _getIndentation(line);
 
-		if (line.find("server:") != std::string::npos) {
+		if (line.find("logging_level:") != std::string::npos) {
+			
+		} else if (line.find("server:") != std::string::npos) {
 			if (location.path != "") {
 				server.locations.push_back(location);
 				location = Location();
 			}
 			if (status != START) {
+				if (server.listen_group.empty()) {
+					logger.error("Listen group not found.");
+					return 1;
+				}
 				_checkParamsPriority(server, temp_var);
 				_servers.push_back(server);
 				server = ServerData();
 				temp_var = ConfigServerData();
 			}
 			status = SERVER;
+			server_indentation = 0;
 		} else if (line.find("location") != std::string::npos) {
 			if (location.path != "") {
 				server.locations.push_back(location);
@@ -323,32 +352,49 @@ int Webserv::_parseConfigFile( const std::string& config_path ) {
 			size_t delimiter1 = line.find('/');
 			size_t delimiter2 = line.find(':');
 			if (delimiter1 == std::string::npos || delimiter2 == std::string::npos) {
-				logger.warning("Invalid location line1: " + line);
-				continue;
+				logger.warning("Invalid location line: " + line);
+				return 1;
 			}
 			location.path = line.substr(delimiter1, delimiter2 - delimiter1);
 			status = LOCATION;
+			location_indentation = 0;
 		} else if (status == SERVER) {
+			if (server_indentation == 0) {
+				server_indentation = curr_indentation;
+			} else if (curr_indentation != server_indentation) {
+				logger.error("Unclear indentation: " + line);
+				return 1;
+			}
 			if (_parseServerData(server, temp_var, line)) return 1;
 		} else if (status == LOCATION) {
-			if (curr_indentation >= pre_indentation) {
+			if (location_indentation == 0) {
+				location_indentation = curr_indentation;
+			}
+			if (curr_indentation == location_indentation) {
 				if (_parseLocation(location, line)) return 1;
-			} else {
+			} else if (curr_indentation == server_indentation) {
 				server.locations.push_back(location);
 				location = Location();
 				status = SERVER;
 				if (_parseServerData(server, temp_var, line)) return 1;
 			}
+			else {
+				logger.error("Unclear indentation: " + line);
+				return 1;
+			}
 		}
-		pre_indentation = curr_indentation;
 	}
 	if (status == LOCATION) {
 		server.locations.push_back(location);
 	}
+	if (server.listen_group.empty()) {
+		logger.error("Listen group not found.");
+		return 1;
+	}
 	_checkParamsPriority(server, temp_var);
 	_servers.push_back(server);
 	_sortLocationByPath();
-	_printConfig();
+	if (logger.getLevel() == DEBUG) _printConfig();
 	return 0;
 }
 

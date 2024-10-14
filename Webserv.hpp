@@ -113,6 +113,7 @@ private:
 	int _parseConfigFile( const std::string& config_path );
 	int _parseServerData( ServerData& server, ConfigServerData& temp_var, const std::string& line );
 	int _parseLocation( Location& location, const std::string& line );
+	int _parseListenGroup( ServerData& server, std::istringstream& line_stream, const std::string& line );
 	void _checkParamsPriority( ServerData& server, ConfigServerData& temp_var );
 	uint32_t _ipStringToDecimal( const std::string& ip_address );
 
