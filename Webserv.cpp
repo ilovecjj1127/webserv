@@ -2,6 +2,38 @@
 
 Webserv Webserv::_instance;
 
+const std::unordered_map<int, std::string> Webserv::_response_codes = {
+	{200, "200 OK"},
+	{403, "403 Forbidden"},
+	{404, "404 Not Found"},
+	{405, "405 Method Not Allowed"},
+	{413, "413 Request Entity Too Large"},
+	{500, "500 Internal Server Error"}
+};
+
+const std::unordered_map<int, std::string> Webserv::_error_pages = {
+	{403, "./default_pages/403.html"},
+	{404, "./default_pages/404.html"},
+	{405, "./default_pages/405.html"},
+	{413, "./default_pages/413.html"},
+	{500, "./default_pages/500.html"},
+	{0, "./default_pages/unknown.html"}
+};
+
+const std::unordered_map<std::string, std::string> Webserv::_mime_types = {
+	{"html", "text/html"},
+	{"css", "text/css"},
+	{"js", "text/javascript"},
+	{"jpg", "image/jpeg"},
+	{"jpeg", "image/jpeg"},
+	{"png", "image/png"},
+	{"ico", "image/x-icon"},
+	{"json", "application/json"},
+	{"pdf", "application/pdf"},
+	{"zip", "application/zip"},
+	{"", "text/plain"}
+};
+
 Webserv::Webserv( void ) {
 	logger.setLevel(DEBUG);
 	logger.debug("Webserv instance created");
@@ -9,8 +41,6 @@ Webserv::Webserv( void ) {
 	_epoll_fd = -1;
 	_event_array_size = 16;
 	_chunk_size = 4096;
-	_timeout_period = 5;
-	_error_page_404 = "/404.html";
 	_timeout_period = 5;
 }
 
@@ -23,7 +53,9 @@ Webserv& Webserv::getInstance( void ) {
 }
 
 int Webserv::startServer( void ) {
-	_parseConfigFile("default.conf");
+	if (_parseConfigFile("default.conf") != 0) {
+		return 1;
+	}
 	// _fakeConfigParser();
 	if (_initWebserv() != 0) {
 		return 1;
@@ -44,7 +76,7 @@ void Webserv::_sortLocationByPath( void ) {
 		std::vector<Location>& locations = server.locations;
 		std::sort(locations.begin(), locations.end(),
 				[](const Location& a, const Location& b) {
-					return a.path.size() > b.path.size();  // Sort by path length (longest first)
+					return a.path.size() > b.path.size();
 				});
 	}
 }
@@ -101,34 +133,53 @@ int _getIndentation( const std::string& line ) {
 	return indentation;
 }
 
-uint32_t _ipStringToDecimal( const std::string& ip_address ) {
+uint32_t Webserv::_ipStringToDecimal( const std::string& ip_address ) {
 	uint32_t result = 0;
 	std::istringstream ip_stream(ip_address);
 	std::string octet;
 	int shift = 24;
+	int octet_count = 0;
 	while (std::getline(ip_stream, octet, '.')) {
 		uint32_t octetValue = static_cast<uint32_t>(std::stoi(octet));
+		if (octetValue > 255) {
+			throw std::out_of_range("Invalid IP address: " + ip_address);
+		}
 		result |= (octetValue << shift);
         shift -= 8;
+		++octet_count;
+	}
+	if (octet_count != 4 && result != 0) {
+		throw std::out_of_range("Invalid IP address: " + ip_address);
 	}
 	return result;
 }
 
-void Webserv::_parseServerData( ServerData& server, TempVar& temp_var, const std::string& line ) {
+int Webserv::_parseServerData( ServerData& server, ConfigServerData& temp_var, const std::string& line ) {
 	size_t delimiter = line.find(":");
 	if (delimiter == std::string::npos) {
-		logger.warning("Invalid server line1: " + line);
-		return;
+		logger.error("Invalid server line: " + line);
+		return 1;
 	}
 	std::istringstream line_stream(line.substr(delimiter + 1));
 
 	if (line.find("listen:") != std::string::npos) {
-		uint16_t port = std::stoi(line.substr(line.find_last_of(':') + 1));
-		std::string ip_address;
-		std::getline(line_stream, ip_address, ':');
-		
-		uint32_t ip = _ipStringToDecimal(ip_address);
-		server.listen_group.push_back(std::make_pair(ip, port));
+		try {
+			long port_value = std::stol(line.substr(line.find_last_of(':') + 1));
+			if (port_value < 1 || port_value > 65535) {
+				throw std::out_of_range("Port number out of range: " + line);
+			}
+			uint16_t port = static_cast<uint16_t>(port_value);
+			std::string ip_address;
+			std::getline(line_stream, ip_address, ':');
+			uint32_t ip = _ipStringToDecimal(ip_address);
+			server.listen_group.push_back(std::make_pair(ip, port));
+		} catch (const std::invalid_argument& e) {
+			logger.error("Invalid ip:port format: " + std::string(e.what()));
+			return 1;
+		} catch (const std::out_of_range& e) {
+			logger.error("[ip:port] out of range: " + std::string(e.what()));
+			return 1;
+		}
 	} else if (line.find("server_name:") != std::string::npos) {
 		std::string server_name;
 		while (line_stream >> server_name) {
@@ -140,7 +191,7 @@ void Webserv::_parseServerData( ServerData& server, TempVar& temp_var, const std
 		line_stream >> temp_var.index_page;
 	} else if (line.find("client_max_body_size:") != std::string::npos) {
 		line_stream >> temp_var.client_max_body_size;
-	} else if (line.find("error_page:") != std::string::npos) { // TODO: not get error_path
+	} else if (line.find("error_page:") != std::string::npos) {
 		int error_code;
 		std::string error_path;
 		while (line_stream >> error_code) {
@@ -154,14 +205,15 @@ void Webserv::_parseServerData( ServerData& server, TempVar& temp_var, const std
 			entry.second = error_path;
 		}
 	}
+	return 0;
 }
 
 // put everything in try catch
-void Webserv::_parseLocation( Location& location, const std::string& line ) {
+int Webserv::_parseLocation( Location& location, const std::string& line ) {
 	size_t delimiter = line.find(":");
 	if (delimiter == std::string::npos) {
-		logger.warning("Invalid location line2: " + line);
-		return;
+		logger.warning("Invalid location line: " + line);
+		return 1;
 	}
 	std::istringstream line_stream(line.substr(delimiter + 1));
 
@@ -177,7 +229,7 @@ void Webserv::_parseLocation( Location& location, const std::string& line ) {
 		line_stream >> location.index_page;
 	} else if (line.find("client_max_body_size:") != std::string::npos) {
 		line_stream >> location.client_max_body_size;
-	} else if (line.find("error_page:") != std::string::npos) {  // TODO: not get error_path
+	} else if (line.find("error_page:") != std::string::npos) {
 		int error_code;
 		std::string error_path;
 		while (line_stream >> error_code) {
@@ -191,8 +243,7 @@ void Webserv::_parseLocation( Location& location, const std::string& line ) {
 			entry.second = error_path;
 		}
 	} else if (line.find("rewrite:") != std::string::npos) {
-		line_stream >> location.redirect_code;
-		line_stream >> location.redirect_path;
+		line_stream >> location.redirect_code >> location.redirect_path;
 	} else if (line.find("limit_except:") != std::string::npos) {
 		location.allowed_methods = {};
 		std::string method;
@@ -202,12 +253,19 @@ void Webserv::_parseLocation( Location& location, const std::string& line ) {
 			{"DELETE", DELETE}
 		};
 		while (line_stream >> method) {
-			location.allowed_methods.insert(methods_map[method]);
+			auto it = methods_map.find(method);
+			if (it != methods_map.end()) {
+				location.allowed_methods.insert(it->second);
+			} else {
+				logger.warning("Invalid method: " + method + " from line: " + line);
+				return 1;
+			}
 		}
 	}
+	return 0;
 }
 
-void Webserv::_checkParamsPriority( ServerData& server, TempVar& temp_var ) {
+void Webserv::_checkParamsPriority( ServerData& server, ConfigServerData& temp_var ) {
 	for (Location& location : server.locations) {
 		if (location.autoindex == -1) {
 			location.autoindex = temp_var.autoindex;
@@ -227,17 +285,18 @@ void Webserv::_checkParamsPriority( ServerData& server, TempVar& temp_var ) {
 }
 
 // if wrong identation check needed?
-void Webserv::_parseConfigFile( const std::string& config_path ) {
+int Webserv::_parseConfigFile( const std::string& config_path ) {
 	std::ifstream file(config_path);
 	if (!file.is_open()) {
 		logger.warning("Failed to open config file: ");
+		return 1;
 	}
 
 	std::string line;
 	ParseStatus status = START;
 	ServerData server;
 	Location location;
-	TempVar temp_var;
+	ConfigServerData temp_var;
 	int pre_indentation = 0;
 
 	while (std::getline(file, line)) {
@@ -249,11 +308,11 @@ void Webserv::_parseConfigFile( const std::string& config_path ) {
 				server.locations.push_back(location);
 				location = Location();
 			}
-			if (status != START) { // not the first server
+			if (status != START) {
 				_checkParamsPriority(server, temp_var);
 				_servers.push_back(server);
 				server = ServerData();
-				temp_var = TempVar();
+				temp_var = ConfigServerData();
 			}
 			status = SERVER;
 		} else if (line.find("location") != std::string::npos) {
@@ -270,15 +329,15 @@ void Webserv::_parseConfigFile( const std::string& config_path ) {
 			location.path = line.substr(delimiter1, delimiter2 - delimiter1);
 			status = LOCATION;
 		} else if (status == SERVER) {
-			_parseServerData(server, temp_var, line);
+			if (_parseServerData(server, temp_var, line)) return 1;
 		} else if (status == LOCATION) {
 			if (curr_indentation >= pre_indentation) {
-				_parseLocation(location, line);
+				if (_parseLocation(location, line)) return 1;
 			} else {
 				server.locations.push_back(location);
 				location = Location();
 				status = SERVER;
-				_parseServerData(server, temp_var, line);
+				if (_parseServerData(server, temp_var, line)) return 1;
 			}
 		}
 		pre_indentation = curr_indentation;
@@ -290,6 +349,7 @@ void Webserv::_parseConfigFile( const std::string& config_path ) {
 	_servers.push_back(server);
 	_sortLocationByPath();
 	_printConfig();
+	return 0;
 }
 
 void Webserv::_fakeConfigParser( void ) {
@@ -302,6 +362,7 @@ void Webserv::_fakeConfigParser( void ) {
 	location1.root = "./nginx_example/html";
 	location1.index_page = "index.html";
 	location1.autoindex = true;
+	// location1.error_pages[404] = "./temp/404.html";
 	server1.locations.push_back(location1);
 
 	Location location2;
@@ -314,6 +375,7 @@ void Webserv::_fakeConfigParser( void ) {
 	location3.path = "/cgi";
 	location3.root = "./nginx_example/cgi";
 	location3.autoindex = true;
+	// location3.error_pages[400] = "./temp/404.html";
 	server1.locations.push_back(location3);
 	
 	_servers.push_back(server1);
@@ -340,7 +402,7 @@ void Webserv::_mainLoop( void ) {
 	time_t last_timeout_check = time(nullptr);
 	while (_keep_running) {
 		int n = epoll_wait(_epoll_fd, events, _event_array_size, _timeout_period * 1000);
-		// logger.debug("Epoll got events: " + std::to_string(n));
+		logger.debug("Epoll got events: " + std::to_string(n));
 		if (n == -1) {
 			if (_keep_running) perror("epoll_wait");
 			break;
@@ -372,7 +434,7 @@ void Webserv::_checkTimeouts( void ) {
 			} else {
 				logger.debug("CGI timeout for client_fd " + std::to_string(client_fd));
 				client_data.last_activity = time(nullptr);
-				client_data.response = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 25\r\n\r\n500 Internal Server Error";
+				_prepareResponseError(client_data, 500);
 				_modifyEpollSocketOut(client_fd);
 				return _closeCgiPipe(client_data.cgi.fd_in, client_data.cgi, nullptr);
 			}
@@ -410,7 +472,7 @@ void Webserv::_generateDirectoryList( const std::string &dir_path, int client_fd
 
 	DIR *dir = opendir(dir_path.c_str());
 	if (dir == nullptr) {
-		response = "HTTP/1.1 403 Forbidden\r\nContent-Length: 13\r\n\r\n403 Forbidden";
+		_prepareResponseError(_clients_map[client_fd], 403);
 		logger.warning("Failed to open directory" + dir_path);
 		return;
 	}
@@ -458,43 +520,95 @@ int Webserv::_prepareResponse( int client_fd, const std::string& file_path, size
 		if (_clients_map[client_fd].location->autoindex == 1) {
 			_generateDirectoryList(full_path, client_fd);
 		} else {
-			response = "HTTP/1.1 403 Forbidden\r\nContent-Length: 13\r\n\r\n403 Forbidden";
+			_prepareResponseError(_clients_map[client_fd], 403);
 		}
 		return 1;
 	}
-	if (full_path.substr(full_path.size() - 3) == ".py") {
+	std::string extension = _getFileExtension(file_path);
+	if (extension == "py") {
 		logger.info("CGI file: " + full_path);
-		if (access(full_path.c_str(), F_OK) == 0) {
+		if (access(full_path.c_str(), X_OK) == 0) {
 		 	return _executeCgi(client_fd, full_path);
 		} else {
-			return _prepareResponse(client_fd, _error_page_404, 404);
+			_prepareResponseError(_clients_map[client_fd], 404);
+			return 1;
 		}
 	}
 	std::ifstream file(full_path);
-	if (!file.is_open() && file_path != _error_page_404) {
+	if (isDirectory(full_path) || !file.is_open()) {
 		logger.warning("Failed to open file: " + full_path);
-		return _prepareResponse(client_fd, _error_page_404, 404);
-	} else if (isDirectory(full_path) || !file.is_open()) {
-		logger.warning("Failed to open file: " + full_path);
-		std::string page404 = "HTTP/1.1 404 Not Found\r\nContent-Length: 13\r\n\r\n404 Not Found";
-		response = page404;
+		_prepareResponseError(_clients_map[client_fd], 404);
 		return 1;
 	}
 	std::stringstream buffer;
 	buffer << file.rdbuf();
 	response = buffer.str();
-	response = _getHtmlHeader(response.size(), status_code) + response;
+	response = _getHtmlHeader(response.size(), status_code, extension) + response;
 	return 1;
 }
 
-std::string Webserv::_getHtmlHeader( size_t content_length, size_t status_code ) {
-	std::string header = "HTTP/1.1 ";
-	if (status_code == 404) {
-		header += "404 Not Found\r\n";
-	} else {
-		header += "200 OK\r\n";
+void Webserv::_prepareResponseError( ClientData& client_data, size_t status_code ) {
+	std::string filepath = "";
+	if (client_data.location != nullptr) {
+		filepath = _getErrorPagePath(client_data.location->error_pages, status_code);
 	}
-	header += "Content-Type: text/html\r\n";
+	if (!filepath.empty() && _saveResponsePage(client_data, filepath, status_code) == 0) {
+		return;
+	}
+	filepath = _getErrorPagePath(_error_pages, status_code);
+	if (filepath.empty()) {
+		filepath = _error_pages.at(0);
+	}
+	_saveResponsePage(client_data, filepath, status_code);
+}
+
+std::string Webserv::_getErrorPagePath(const std::unordered_map<int, std::string>& error_pages, size_t status_code) {
+	if (error_pages.find(status_code) == error_pages.end()) {
+		return "";
+	}
+	const std::string& filepath = error_pages.at(status_code);
+	if (access(filepath.c_str(), R_OK) == 0 && isDirectory(filepath) == 0) {
+		return filepath;
+	}
+	return "";
+}
+
+int Webserv::_saveResponsePage( ClientData& client_data, std::string& filepath, int status_code ) {
+	std::ifstream file(filepath);
+	if (!file.is_open()) {
+		return 1;
+	}
+	std::stringstream buffer;
+	buffer << file.rdbuf();
+	std::string& response = client_data.response;
+	response = buffer.str();
+	std::string extension = _getFileExtension(filepath);
+	response = _getHtmlHeader(response.size(), status_code, extension) + response;
+	return 0;
+}
+
+std::string Webserv::_getFileExtension( const std::string& filepath ) {
+	size_t pos = filepath.rfind('.');
+	if (pos == std::string::npos) {
+		return "";
+	}
+	return filepath.substr(pos + 1);
+}
+
+std::string Webserv::_getHtmlHeader( size_t content_length, size_t status_code, const std::string& extension ) {
+	std::string header = "HTTP/1.1 ";
+	if (_response_codes.find(status_code) != _response_codes.end()) {
+		header += _response_codes.at(status_code) + "\r\n";
+	} else {
+		header += std::to_string(status_code) + "\r\n";
+	}
+	std::string content_type;
+	if (_mime_types.find(extension) == _mime_types.end()) {
+		content_type = _mime_types.at("");
+	} else {
+		content_type = _mime_types.at(extension);
+	}
+	header += "Content-Type: " + content_type + "\r\n";
 	header += "Content-Length: " + std::to_string(content_length) + "\r\n\r\n";
 	return header;
 }

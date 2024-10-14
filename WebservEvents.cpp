@@ -95,7 +95,7 @@ int Webserv::_getTargetLocation( int client_fd ) {
 		}
 	}
 	if (_clients_map[client_fd].location == nullptr) {
-		_clients_map[client_fd].response = "HTTP/1.1 404 Not Found\r\nContent-Length: 13\r\n\r\n404 Not Found";
+		_prepareResponseError(_clients_map[client_fd], 404);
 		_modifyEpollSocketOut(client_fd);
 	}
 	return 1;
@@ -108,12 +108,12 @@ int Webserv::_checkRequestValid( const Request& request, int client_fd ) {
 	Location& location = *(_clients_map[client_fd].location);
 	std::string& response = _clients_map[client_fd].response;
 	if (methods.find(request.method) == methods.end()) {
-		response = "HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 22\r\n\r\n405 Method Not Allowed";
+		_prepareResponseError(_clients_map[client_fd], 405);
 		_modifyEpollSocketOut(client_fd);
 		return 1;
 	}
 	if (request.content_length > _clients_map[client_fd].location->client_max_body_size) {
-		response = "HTTP/1.1 413 Request Entity Too Large\r\nContent-Length: 28\r\n\r\n413 Request Entity Too Large";
+		_prepareResponseError(_clients_map[client_fd], 413);
 		_modifyEpollSocketOut(client_fd);
 		return 1;
 	}
@@ -171,7 +171,7 @@ void Webserv::_sendCgiRequest( int fd_out ) {
 	ssize_t bytes = write(fd_out, chunk.data(), chunk_size);
 	client_data.last_activity = time(nullptr);
 	if (bytes < 0) {
-		client_data.response = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 25\r\n\r\n500 Internal Server Error";
+		_prepareResponseError(client_data, 500);
 		_modifyEpollSocketOut(client_fd);
 		return _closeCgiPipe(client_data.cgi.fd_in, client_data.cgi, "write pipe: ");
 	}
@@ -188,22 +188,35 @@ void Webserv::_getCgiResponse( int fd_in ) {
 	client_data.last_activity = time(nullptr);
 	logger.info("bytes read from pipe: " + std::to_string(bytes));
 	if (bytes < 0) {
-		response = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 25\r\n\r\n500 Internal Server Error";
+		_prepareResponseError(client_data, 500);
 		_modifyEpollSocketOut(client_fd);
 		return _closeCgiPipe(fd_in, client_data.cgi, "read pipe: ");
 	} else if (bytes > 0) {
 		response.append(buffer, bytes);
 	}
 	if (bytes == 0) {
-		size_t pos = response.find("Status:");
-		if (pos != std::string::npos) {
-			response.replace(pos, 7, "HTTP/1.1");
-		} else {
-			response.insert(0, "HTTP/1.1 200 OK\r\n");
-		}
+		_handleCgiResponse(client_data);
 		logger.info(response);
 		_modifyEpollSocketOut(client_fd);
 		_closeCgiPipe(fd_in, client_data.cgi, nullptr);
 	}
 }
 
+void Webserv::_handleCgiResponse( ClientData& client_data ) {
+	std::string& response = client_data.response;
+	if (response.size() < 8 || response.compare(0, 8, "Status: ") != 0) {
+		response.insert(0, "HTTP/1.1 200 OK\r\n");
+		return;
+	}
+	std::string status_str = response.substr(8, 4);
+	int status_code = _stringToInt(status_str);
+	Location* location = client_data.location;
+	if (status_code < 100 || status_code > 599 || status_str.back() != ' ') {
+		_prepareResponseError(client_data, 500);
+	} else if (location != nullptr
+		&& location->error_pages.find(status_code) != location->error_pages.end()) {
+		_prepareResponseError(client_data, status_code);
+	} else {
+		response.replace(0, 7, "HTTP/1.1");
+	}
+}
