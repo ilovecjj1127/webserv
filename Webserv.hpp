@@ -30,6 +30,8 @@
 #include "Request.hpp"
 
 
+using map_str_str = std::unordered_map<std::string, std::string>;
+
 struct CgiData {
 	pid_t	pid = 0;
 	int		client_fd = 0;
@@ -82,14 +84,14 @@ private:
 	void _stopServer( void );
 	void _mainLoop( void );
 	void _checkTimeouts( void );
-	std::string _getHtmlHeader( size_t content_length, size_t status_code, const std::string& extension );
-	int _prepareResponse( int client_fd, const std::string& file_path, size_t status_code = 200 );
-	void _generateDirectoryList( const std::string &dir_path, int client_fd );
+	// std::string _getHtmlHeader( size_t content_length, size_t status_code, const std::string& extension );
+	// int _prepareResponse( int client_fd, const std::string& file_path, size_t status_code = 200 );
+	// void _generateDirectoryList( const std::string &dir_path, int client_fd );
 	void _getTargetServer(int client_fd, const std::string& host);
-	void _prepareResponseError( ClientData& client_data, size_t status_code );
-	std::string _getErrorPagePath(const std::unordered_map<int, std::string>& error_pages, size_t status_code);
-	int _saveResponsePage( ClientData& client_data, std::string& filepath, int status_code );
-	std::string _getFileExtension( const std::string& filepath );
+	// void _prepareResponseError( ClientData& client_data, size_t status_code );
+	// std::string _getErrorPagePath(const std::unordered_map<int, std::string>& error_pages, size_t status_code);
+	// int _saveResponsePage( ClientData& client_data, std::string& filepath, int status_code );
+	// std::string _getFileExtension( const std::string& filepath );
 
 	// WebservConfig.cpp
 	void _fakeConfigParser( void );
@@ -102,7 +104,7 @@ private:
 	uint32_t _ipStringToDecimal( const std::string& ip_address );
 
 	// WebservCgi.cpp
-	int _executeCgi( int client_fd, std::string& path );
+	int _executeCgi( int client_fd );
 	void _connectCgi( int client_fd, int fd_in, int fd_out);
 	int _endCgi( int fd_res[2], int fd_body[2], int client_fd );
 	void _createEnvs( const Request& req, std::vector<std::string>& env_strings );
@@ -130,7 +132,7 @@ private:
 	int _setNonBlocking( int fd );
 	void _closeClientFd( int client_fd, const char* err_msg );
 	void _modifyEpollSocketOut( int client_fd );
-	int _stringToInt( const std::string& str );
+	// int _stringToInt( const std::string& str );
 
 public:
 	Webserv( const Webserv& ) = delete;
