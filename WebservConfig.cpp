@@ -108,7 +108,12 @@ int Webserv::_parseListenGroup( ServerData& server, std::istringstream& line_str
 }
 
 int Webserv::_parseServerData( ServerData& server, ConfigServerData& temp_var, const std::string& line ) {
-	std::istringstream line_stream(line.substr(line.find(":") + 1));
+	size_t delimiter = line.find(":");
+	if (delimiter == std::string::npos) {
+		logger.error("Invalid server line: " + line);
+		return 1;
+	}
+	std::istringstream line_stream(line.substr(delimiter + 1));
 
 	if (line.find("listen:") != std::string::npos) {
 		return _parseListenGroup(server, line_stream, line);
@@ -148,7 +153,12 @@ int Webserv::_parseServerData( ServerData& server, ConfigServerData& temp_var, c
 }
 
 int Webserv::_parseLocation( Location& location, const std::string& line ) {
-	std::istringstream line_stream(line.substr(line.find(":") + 1));
+	size_t delimiter = line.find(":");
+	if (delimiter == std::string::npos) {
+		logger.error("Invalid location line: " + line);
+		return 1;
+	}
+	std::istringstream line_stream(line.substr(delimiter + 1));
 
 	if (line.find("root:") != std::string::npos) {
 		line_stream >> location.root;
@@ -206,14 +216,19 @@ int Webserv::_parseLocation( Location& location, const std::string& line ) {
 }
 
 int Webserv::_parseLoggingLevel( const std::string& line ) {
-	std::istringstream line_stream(line.substr(line.find(":") + 1));
+	size_t delimiter = line.find(":");
+	if (delimiter == std::string::npos) {
+		logger.error("Invalid line: " + line);
+		return 1;
+	}
+	std::istringstream line_stream(line.substr(delimiter + 1));
 	std::string level;
 	line_stream >> level;
 	if (level.find_last_not_of(" \t") != std::string::npos) {
 		level = level.substr(0, level.find_last_not_of(" \t") + 1);
 	}
 	std::unordered_map<std::string, Level> levels_map = {
-		{"DEBEG", DEBUG},
+		{"DEBUG", DEBUG},
 		{"INFO", INFO},
 		{"WARNING", WARNING},
 		{"ERROR", ERROR},
@@ -266,7 +281,7 @@ int Webserv::_parseConfigFile( const std::string& config_path ) {
 		if (line.find('#') != std::string::npos) {
 			line = line.substr(0, line.find('#'));
         }
-		if (line.find(":") == std::string::npos) continue;
+		if (line.find_first_not_of(" \t") == std::string::npos) continue;
 		int curr_indentation = _getIndentation(line);
 
 		if (line.find("logging_level:") != std::string::npos) {
