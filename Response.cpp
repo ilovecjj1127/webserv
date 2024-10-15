@@ -57,36 +57,52 @@ int Response::prepareResponse( const std::string& file_path, size_t status_code 
 		if (access((root_path + index_page).c_str(), F_OK) == 0) {
 			return prepareResponse(index_page, 200);
 		}
+	} else if (_checkIfDirectory(file_path, full_path)) {
+		return 1;
 	}
+	std::string extension = _getFileExtension(file_path);
+	if (extension == "py") {
+		return _checkCgiAccess(full_path);
+	}
+	_prepareStaticFile(full_path, extension, status_code);
+	return 1;
+}
+
+bool Response::_checkIfDirectory( const std::string& file_path, const std::string& full_path ) {
 	if (full_path.back() == '/' && _isDirectory(full_path)) {
 		if (location->autoindex == 1) {
 			_generateDirectoryList(full_path, file_path);
 		} else {
 			prepareResponseError(403);
 		}
-		return 1;
+		return true;
+	} else {
+		return false;
 	}
-	std::string extension = _getFileExtension(file_path);
-	if (extension == "py") {
-		logger.info("CGI file: " + full_path);
-		if (access(full_path.c_str(), X_OK) == 0) {
-			return 0;
-		} else {
-			prepareResponseError(404);
-			return 1;
-		}
-	}
-	std::ifstream file(full_path);
-	if (_isDirectory(full_path) || !file.is_open()) {
-		logger.warning("Failed to open file: " + full_path);
+}
+
+int Response::_checkCgiAccess( const std::string& full_path ) {
+	logger.info("CGI file: " + full_path);
+	if (access(full_path.c_str(), X_OK) == 0) {
+		return 0;
+	} else {
 		prepareResponseError(404);
 		return 1;
 	}
+}
+
+void Response::_prepareStaticFile(const std::string& path, const std::string& extension, size_t status_code ) {
+	std::ifstream file(path);
+	if (_isDirectory(path) || !file.is_open()) {
+		logger.warning("Failed to open file: " + path);
+		prepareResponseError(404);
+		return;
+	}
 	std::stringstream buffer;
 	buffer << file.rdbuf();
-	full_response = buffer.str();
-	full_response = _getHtmlHeader(full_response.size(), status_code, extension) + full_response;
-	return 1;
+	std::string body = buffer.str();
+	std::string header = _getHtmlHeader(body.size(), status_code, extension);
+	full_response = header + body;
 }
 
 void Response::prepareResponseError( size_t status_code ) {
