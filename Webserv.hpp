@@ -111,6 +111,7 @@ private:
 	void _sortLocationByPath( void );
 	void _printConfig( void ) const;
 	int _parseConfigFile( const std::string& config_path );
+	int _parseLoggingLevel( const std::string& line );
 	int _parseServerData( ServerData& server, ConfigServerData& temp_var, const std::string& line );
 	int _parseLocation( Location& location, const std::string& line );
 	int _parseListenGroup( ServerData& server, std::istringstream& line_stream, const std::string& line );
@@ -157,5 +158,5 @@ public:
 	static Webserv& getInstance( void );
 	static void handleSigInt(int signum);
 
-	int startServer( void );
+	int startServer( const std::string& config_file );
 };

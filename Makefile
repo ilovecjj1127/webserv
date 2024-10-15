@@ -3,6 +3,7 @@ NAME = webserv
 OBJ_DIR = obj
 
 SOURCES = Webserv.cpp WebservInit.cpp WebservEvents.cpp WebservCgi.cpp WebservUtils.cpp \
+		  WebservConfig.cpp \
 		  Logger.cpp Request.cpp \
 		  main.cpp 
 
