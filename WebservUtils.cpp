@@ -27,12 +27,3 @@ void Webserv::_modifyEpollSocketOut( int client_fd ) {
 		_closeClientFd(client_fd, "epoll_ctl: mod client_fd");
 	}
 }
-
-// int Webserv::_stringToInt( const std::string& str ) {
-// 	try {
-// 		int status_code = std::stoi(str);
-// 		return status_code;
-// 	} catch (const std::invalid_argument&) {
-// 		return -1;
-// 	}
-// }

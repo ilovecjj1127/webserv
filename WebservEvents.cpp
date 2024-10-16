@@ -203,22 +203,3 @@ void Webserv::_getCgiResponse( int fd_in ) {
 		_closeCgiPipe(fd_in, client_data.cgi, nullptr);
 	}
 }
-
-// void Webserv::_handleCgiResponse( ClientData& client_data ) {
-// 	std::string& response = client_data.response;
-// 	if (response.size() < 8 || response.compare(0, 8, "Status: ") != 0) {
-// 		response.insert(0, "HTTP/1.1 200 OK\r\n");
-// 		return;
-// 	}
-// 	std::string status_str = response.substr(8, 4);
-// 	int status_code = _stringToInt(status_str);
-// 	Location* location = client_data.location;
-// 	if (status_code < 100 || status_code > 599 || status_str.back() != ' ') {
-// 		_prepareResponseError(client_data, 500);
-// 	} else if (location != nullptr
-// 		&& location->error_pages.find(status_code) != location->error_pages.end()) {
-// 		_prepareResponseError(client_data, status_code);
-// 	} else {
-// 		response.replace(0, 7, "HTTP/1.1");
-// 	}
-// }
