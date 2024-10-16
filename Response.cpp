@@ -91,7 +91,8 @@ int Response::_checkCgiAccess( const std::string& full_path ) {
 	}
 }
 
-void Response::_prepareStaticFile(const std::string& path, const std::string& extension, size_t status_code ) {
+void Response::_prepareStaticFile(const std::string& path, const std::string& extension,
+								  size_t status_code ) {
 	std::ifstream file(path);
 	if (_isDirectory(path) || !file.is_open()) {
 		logger.warning("Failed to open file: " + path);
@@ -152,7 +153,8 @@ std::string Response::_getFileExtension( const std::string& filepath ) {
 	return filepath.substr(pos + 1);
 }
 
-std::string Response::_getHtmlHeader( size_t content_length, size_t status_code, const std::string& extension ) {
+std::string Response::_getHtmlHeader( size_t content_length, size_t status_code,
+									  const std::string& extension ) {
 	std::string header = "HTTP/1.1 ";
 	if (_response_codes.find(status_code) != _response_codes.end()) {
 		header += _response_codes.at(status_code) + "\r\n";
@@ -179,12 +181,10 @@ int Response::_isDirectory( const std::string& full_path ) {
 	return 0;
 }
 
-void Response::_generateDirectoryList( const std::string& dir_path, const std::string& file_path ) {
+void Response::_generateDirectoryList( const std::string& dir_path,
+									   const std::string& file_path ) {
 	std::ostringstream html;
-	std::string name, full_path, size, mod_time;
-
 	html << "<html><body><h1>Index of " << file_path << "</h1>\n<hr><pre><table>\n";
-
 	DIR *dir = opendir(dir_path.c_str());
 	if (dir == nullptr) {
 		prepareResponseError(403);
@@ -193,24 +193,7 @@ void Response::_generateDirectoryList( const std::string& dir_path, const std::s
 	}
 	struct dirent *entry;
 	while ((entry = readdir(dir)) != nullptr) {
-		name = entry->d_name;
-		full_path = dir_path + name;
-		if (name == ".") continue;
-		if (name == "..") {
-			name += "/";
-		} else if (entry->d_type == DT_DIR) {
-			name += "/";
-			size = "-";
-			mod_time = _getModTime(full_path);
-		} else {
-			struct stat st;
-			stat(full_path.c_str(), &st);
-			size = std::to_string(st.st_size);
-			mod_time = _getModTime(full_path);
-		}
-		html << "<tr><td style=\"width:70%\"><a href=\"" << name << "\">" << name << "</a></td>"
-			 << "<td style=\"width:20%\">" << mod_time << "</td>"
-			 << "<td align=\"right\">" << size << "</td></tr>\n";
+		html << _getEntryLine(entry, dir_path);
 	}
 	closedir(dir);
 	html << "</table>\n</pre><hr></body>\n</html>\n";
@@ -218,15 +201,51 @@ void Response::_generateDirectoryList( const std::string& dir_path, const std::s
 	full_response += std::to_string(html.str().size())+ "\r\n\r\n" + html.str();
 }
 
-std::string Response::_getModTime( const std::string& path ) {
-	struct stat file_stat;
-	if (stat(path.c_str(), &file_stat) == 0) {
-		struct tm *tm = localtime(&file_stat.st_mtime);
-		char timebuf[80];
-		strftime(timebuf, sizeof(timebuf), "%d-%b-%Y %H:%M", tm);
-		return std::string(timebuf);
+// std::string Response::_getModTime( const std::string& path ) {
+// 	struct stat file_stat;
+// 	if (stat(path.c_str(), &file_stat) == 0) {
+// 		struct tm *tm = localtime(&file_stat.st_mtime);
+// 		char timebuf[80];
+// 		strftime(timebuf, sizeof(timebuf), "%d-%b-%Y %H:%M", tm);
+// 		return std::string(timebuf);
+// 	}
+// 	return "Unknown";
+// }
+
+std::string Response::_getEntryLine( struct dirent* entry, const std::string& dir_path ) {
+	std::string name, full_path, size, mod_time;
+	name = entry->d_name;
+	full_path = dir_path + name;
+	if (name == ".") {
+		return "";
 	}
-	return "Unknown";
+	if (name == "..") {
+		name += "/";
+	} else {
+		_getEntryStats(full_path, size, mod_time);
+		if (entry->d_type == DT_DIR) {
+			name += "/";
+			size = "-";
+		}
+	}
+	return std::string("<tr><td style=\"width:70%\"><a href=\"") + name + "\">" + 
+		   name + "</a></td>" + "<td style=\"width:20%\">" + mod_time + "</td>" +
+		   "<td align=\"right\">" + size + "</td></tr>\n";
+
+}
+
+void Response::_getEntryStats( const std::string& path, std::string& size, std::string& mod_time ) {
+	struct stat entry_stat;
+	if (stat(path.c_str(), &entry_stat) == -1) {
+		size = "Unknown";
+		mod_time = "Unknown";
+		return;
+	}
+	struct tm *tm = localtime(&entry_stat.st_mtime);
+	char timebuf[80];
+	strftime(timebuf, sizeof(timebuf), "%d-%b-%Y %H:%M", tm);
+	mod_time = std::string(timebuf);
+	size = std::to_string(entry_stat.st_size);
 }
 
 void Response::handleCgiResponse( void ) {
