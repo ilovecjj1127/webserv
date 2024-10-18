@@ -21,6 +21,7 @@
 #include <vector>
 #include <algorithm>
 
+#include "Config.hpp"
 #include "Location.hpp"
 #include "Logger.hpp"
 #include "Response.hpp"
@@ -40,13 +41,6 @@ struct ServerData {
 	std::vector<std::pair<uint32_t, uint16_t>>	listen_group; // <ip_address, port> pairs
 	std::vector<std::string>					server_names;
 	std::vector<Location>						locations;
-};
-
-struct ConfigServerData {
-	std::string 								index_page;
-	int											autoindex = 0;
-	size_t										client_max_body_size = 1048576;
-	std::unordered_map<int, std::string>		error_pages;
 };
 
 struct ClientData {
@@ -88,16 +82,23 @@ private:
 	void _sortLocationByPath( void );
 	void _printConfig( void ) const;
 	int _parseConfigFile( const std::string& config_path );
+	int _parseConfigLine( const std::string& line, ServerData& server, Location& location, ConfigData& config_data );
 	int _parseLoggingLevel( const std::string& line );
-	int _parseServerData( ServerData& server, ConfigServerData& temp_var, const std::string& line );
+	int _parseServerData( ServerData& server, ConfigData& config_data, const std::string& line );
+	int _parseLocationPathLine( const std::string& line, ServerData& server, Location& location, ConfigData& config_data );
 	int _parseLocation( Location& location, const std::string& line );
+	int _parseErrorPage( std::istringstream& line_stream, std::unordered_map<int, std::string>& error_pages );
+	int _parseAllowedMethod( std::istringstream& line_stream, std::set<Method>& allowed_methods );
 	int _parseListenGroup( ServerData& server, std::istringstream& line_stream, const std::string& line );
-	void _checkParamsPriority( ServerData& server, ConfigServerData& temp_var );
+	int _addServer( ServerData& server, ConfigData& config_data, Location& location );
+	void _checkParamsPriority( ServerData& server, ConfigData& config_data );
 	uint32_t _ipStringToDecimal( const std::string& ip_address );
 
 	// WebservCgi.cpp
 	int _executeCgi( int client_fd );
+	int _executeChild( int client_fd );
 	void _connectCgi( int client_fd, int fd_in, int fd_out);
+	int _connectCgiOut( int client_fd, int fd_in, int fd_out );
 	int _endCgi( int fd_res[2], int fd_body[2], int client_fd );
 	void _createEnvs( const Request& req, std::vector<std::string>& env_strings );
 	void _closeCgiPipe( int pipe_fd, CgiData& cgi, const char* err_msg );
