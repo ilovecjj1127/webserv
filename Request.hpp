@@ -5,7 +5,7 @@
 #include <unordered_map>
 #include <sstream>
 
-using str_map = std::unordered_map<std::string, std::string>;
+using map_str_str = std::unordered_map<std::string, std::string>;
 
 enum Method {
 	UNDEFINED,
@@ -35,14 +35,14 @@ public:
 
 	static const std::unordered_map<std::string, Method> methods;
 
-	std::string raw;
-	Method		method;
-	std::string	path;
-	str_map		params;
-	str_map		headers;
-	std::string	body;
-	RqStatus	status;
-	uint64_t	content_length;
+	std::string		raw;
+	Method			method;
+	std::string		path;
+	map_str_str		params;
+	map_str_str		headers;
+	std::string		body;
+	RqStatus		status;
+	uint64_t		content_length;
 
 	RqStatus parseRequest( void );
 	RqStatus getRequestBody( void );
