@@ -106,6 +106,7 @@ private:
 	// WebservEvents.cpp
 	void _handleEvent( epoll_event& event );
 	void _handleConnection( const int server_fd );
+	void _handleClientRequest( int client_fd );
 	int _getClientRequest( int client_fd );
 	void _sendClientResponse( int client_fd );
 	void _getCgiResponse( int fd_in );

@@ -36,7 +36,7 @@ int Response::prepareResponse( const std::string& file_path, size_t status_code 
 }
 
 int Response::_checkCgiAccess( const std::string& full_path ) {
-	logger.info("CGI file: " + full_path);
+	logger.debug("CGI file: " + full_path);
 	if (access(full_path.c_str(), X_OK) == 0) {
 		return 0;
 	} else {

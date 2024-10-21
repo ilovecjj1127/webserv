@@ -12,16 +12,7 @@ void Webserv::_handleEvent( epoll_event& event ) {
 	} else if (_clients_map.find(event.data.fd) == _clients_map.end()) {
 		return;
 	} else if (event.events & EPOLLIN) {
-		int client_fd = event.data.fd;
-		ClientData& client_data = _clients_map[client_fd];
-		if (_getClientRequest(client_fd) == 0) {
-			Response& response = client_data.response;
-			if (response.prepareResponse(client_data.request.path) == 1 
-				|| _executeCgi(client_fd) == 1) {
-				logger.debug(client_data.response.full_response);
-				_modifyEpollSocketOut(client_fd);
-			} 
-		}
+		_handleClientRequest(event.data.fd);
 	} else if (event.events & EPOLLOUT) {
 		_sendClientResponse(event.data.fd);
 	}
@@ -52,6 +43,22 @@ void Webserv::_handleConnection( const int server_fd ) {
 	logger.debug("Accepted connection on client_fd " + std::to_string(client_fd));
 }
 
+void Webserv::_handleClientRequest( int client_fd ) {
+	ClientData& client_data = _clients_map[client_fd];
+	if (_getClientRequest(client_fd) != 0) {
+		return;
+	}
+	Response& response = client_data.response;
+	if (client_data.request.status == INVALID) {
+		response.prepareResponseError(400);
+	} else if (response.prepareResponse(client_data.request.path) == 0 
+			   && _executeCgi(client_fd) == 0) {
+		return;
+	}
+	logger.debug(client_data.response.full_response);
+	_modifyEpollSocketOut(client_fd);
+}
+
 int Webserv::_getClientRequest( int client_fd ) {
 	char buffer[_chunk_size];
 	Request& request = _clients_map[client_fd].request;
@@ -65,8 +72,8 @@ int Webserv::_getClientRequest( int client_fd ) {
 	}
 	if (request.status == NEW && request.raw.find("\r\n\r\n") != std::string::npos) {
 		request.status = request.parseRequest();
-		_getTargetServer(client_fd, request.headers["Host"]);
 		if (request.status != INVALID) {
+			_getTargetServer(client_fd, request.headers["Host"]);
 			if (_getTargetLocation(client_fd)) return 4;
 			if (_checkRequestValid(request, client_fd)) return 3;
 		}
@@ -92,7 +99,7 @@ int Webserv::_getTargetLocation( int client_fd ) {
 			response.location = &location;
 			path.erase(0, location.path.size());
 			if (path.front() != '/') path.insert(0, 1, '/');
-			logger.info("Found Path: " + location.path);
+			logger.debug("Found Path: " + location.path);
 			return 0;
 		}
 	}
@@ -171,7 +178,7 @@ void Webserv::_sendCgiRequest( int fd_out ) {
 	std::string_view chunk(request.body.c_str() + bytes_write_total, chunk_size);
 	ssize_t bytes = write(fd_out, chunk.data(), chunk_size);
 	client_data.last_activity = time(nullptr);
-	if (bytes < 0) {
+	if (bytes <= 0) {
 		client_data.response.prepareResponseError(500);
 		_modifyEpollSocketOut(client_fd);
 		return _closeCgiPipe(client_data.cgi.fd_in, client_data.cgi, "write pipe: ");
@@ -187,7 +194,7 @@ void Webserv::_getCgiResponse( int fd_in ) {
 	char buffer[_chunk_size];
 	ssize_t bytes = read(fd_in, buffer, sizeof(buffer));
 	client_data.last_activity = time(nullptr);
-	logger.info("bytes read from pipe: " + std::to_string(bytes));
+	logger.debug("bytes read from pipe: " + std::to_string(bytes));
 	if (bytes < 0) {
 		response.prepareResponseError(500);
 		_modifyEpollSocketOut(client_fd);
@@ -197,7 +204,7 @@ void Webserv::_getCgiResponse( int fd_in ) {
 	}
 	if (bytes == 0) {
 		response.handleCgiResponse();
-		logger.info(response.full_response);
+		logger.debug(response.full_response);
 		_modifyEpollSocketOut(client_fd);
 		_closeCgiPipe(fd_in, client_data.cgi, nullptr);
 	}
