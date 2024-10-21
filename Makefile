@@ -4,6 +4,7 @@ OBJ_DIR = obj
 
 SOURCES = Webserv.cpp WebservInit.cpp WebservEvents.cpp WebservCgi.cpp WebservUtils.cpp \
 		  Response.cpp ResponseConsts.cpp ResponseDirectory.cpp ResponseUtils.cpp \
+		  WebservConfig.cpp \
 		  Logger.cpp Request.cpp main.cpp 
 
 OBJECTS = $(addprefix $(OBJ_DIR)/, $(SOURCES:.cpp=.o))

@@ -17,6 +17,25 @@ int Webserv::_endCgi( int fd_res[2], int fd_body[2], int client_fd ) {
 	return 1;
 }
 
+int Webserv::_executeChild( int client_fd ) {
+	std::string path = _clients_map[client_fd].response.location->root;
+	path += _clients_map[client_fd].request.path;
+	std::vector<char*> cmds = {
+		const_cast<char*>("python3"),
+		const_cast<char*>(path.c_str()),
+		nullptr
+	};
+	std::vector<std::string> env_strings;
+	_createEnvs(_clients_map[client_fd].request, env_strings);
+	std::vector<char*> envp;
+	for (std::string& env : env_strings) {
+		envp.push_back(const_cast<char*>(env.c_str()));
+	}
+	envp.push_back(nullptr);
+	execve("/usr/bin/python3", cmds.data(), envp.data());
+	exit(EXIT_FAILURE);
+}
+
 int Webserv::_executeCgi( int client_fd ) {
 	int fd_res[2], fd_body[2];
 	if (pipe(fd_res) == -1 || pipe(fd_body) == -1) {
@@ -34,22 +53,7 @@ int Webserv::_executeCgi( int client_fd ) {
 		dup2(fd_res[1], STDOUT_FILENO);
 		close(fd_res[1]);
 		close(fd_body[0]);
-		std::string path = _clients_map[client_fd].response.location->root;
-		path += _clients_map[client_fd].request.path;
-		std::vector<char*> cmds = {
-			const_cast<char*>("python3"),
-			const_cast<char*>(path.c_str()),
-			nullptr
-		};
-		std::vector<std::string> env_strings;
-		_createEnvs(_clients_map[client_fd].request, env_strings);
-		std::vector<char*> envp;
-		for (std::string& env : env_strings) {
-			envp.push_back(const_cast<char*>(env.c_str()));
-		}
-		envp.push_back(nullptr);
-		execve("/usr/bin/python3", cmds.data(), envp.data());
-		exit(EXIT_FAILURE);
+		_executeChild(client_fd);
 	}
 	_clients_map[client_fd].cgi.pid = pid;
 	close(fd_body[0]);
@@ -58,12 +62,9 @@ int Webserv::_executeCgi( int client_fd ) {
 	return 0;
 }
 
-void Webserv::_connectCgi( int client_fd, int fd_in, int fd_out) {
+int Webserv::_connectCgiOut( int client_fd, int fd_in, int fd_out ) {
 	ClientData& client_data = _clients_map[client_fd];
 	CgiData& cgi = client_data.cgi;
-	cgi.client_fd = client_fd;
-	_setNonBlocking(fd_out);
-	_setNonBlocking(fd_in);
 	Method method = client_data.request.method;
 	if (method == POST || method == DELETE) {
 		epoll_event event;
@@ -73,12 +74,25 @@ void Webserv::_connectCgi( int client_fd, int fd_in, int fd_out) {
 			client_data.response.prepareResponseError(500);
 			_modifyEpollSocketOut(client_fd);
 			close(fd_in);
-			return _closeCgiPipe(fd_out, cgi, "Failed to add cgi.fd_out to epoll: ");
+			_closeCgiPipe(fd_out, cgi, "Failed to add cgi.fd_out to epoll: ");
+			return 1;
 		}
 		_pipe_map[fd_out] = client_fd;
 		cgi.fd_out = fd_out;
 	} else {
 		close(fd_out);
+	}
+	return 0;
+}
+
+void Webserv::_connectCgi( int client_fd, int fd_in, int fd_out ) {
+	ClientData& client_data = _clients_map[client_fd];
+	CgiData& cgi = client_data.cgi;
+	cgi.client_fd = client_fd;
+	_setNonBlocking(fd_out);
+	_setNonBlocking(fd_in);
+	if (_connectCgiOut(client_fd, fd_in, fd_out) == 1) {
+		return;
 	}
 	epoll_event event;
 	event.events = EPOLLIN | EPOLLHUP;
@@ -112,7 +126,6 @@ void Webserv::_createEnvs( const Request& req, std::vector<std::string>& env_str
 		{DELETE, "DELETE"}
 	};
 	env_map["REQUEST_METHOD"] = methods_map[req.method];
-	// env_map["SERVER_PORT"] = std::to_string(_listen_port);
 	std::string temp_str;
 	for (const auto& it : env_map) {
 		temp_str = "";

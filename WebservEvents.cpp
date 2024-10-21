@@ -18,7 +18,6 @@ void Webserv::_handleEvent( epoll_event& event ) {
 			Response& response = client_data.response;
 			if (response.prepareResponse(client_data.request.path) == 1 
 				|| _executeCgi(client_fd) == 1) {
-				logger.debug("static page");
 				logger.debug(client_data.response.full_response);
 				_modifyEpollSocketOut(client_fd);
 			} 
