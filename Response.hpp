@@ -22,19 +22,18 @@ private:
 	static const map_str_str _mime_types;
 
 	// Response.cpp
-	int _checkCgiAccess( const std::string& full_path );
-	void _prepareStaticFile(const std::string& path, const std::string& extension,
-							size_t status_code );
+	int _checkCgiAccess( void );
+	void _prepareStaticFile( const std::string& extension, size_t status_code );
 	std::string _getErrorPagePath(const map_int_str& error_pages, size_t status_code);
 	int _saveResponsePage( std::string& filepath, int status_code );
 	std::string _getHtmlHeader( size_t content_length, size_t status_code,
 								const std::string& extension );
 
 	// ResponseDirectory.cpp
-	bool _checkIfDirectory( const std::string& file_path, const std::string& full_path );
+	bool _checkIfDirectory( const std::string& file_path );
 	int _isDirectory( const std::string& full_path );
-	void _generateDirectoryList( const std::string& dir_path, const std::string& file_path );
-	std::string _getEntryLine( struct dirent* entry, const std::string& dir_path );
+	void _generateDirectoryList( const std::string& file_path );
+	std::string _getEntryLine( struct dirent* entry );
 	void _getEntryStats( const std::string& path, std::string& size, std::string& mod_time );
 
 	// ResponseUtils.cpp
@@ -50,6 +49,7 @@ public:
 	Response& operator = ( const Response& other );
 
 	std::string	full_response;
+	std::string local_path;
 	Location*	location;
 	Logger&		logger;
 

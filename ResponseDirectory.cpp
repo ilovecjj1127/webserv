@@ -1,9 +1,9 @@
 #include "Response.hpp"
 
-bool Response::_checkIfDirectory( const std::string& file_path, const std::string& full_path ) {
-	if (full_path.back() == '/' && _isDirectory(full_path)) {
+bool Response::_checkIfDirectory( const std::string& file_path ) {
+	if (local_path.back() == '/' && _isDirectory(local_path)) {
 		if (location->autoindex == 1) {
-			_generateDirectoryList(full_path, file_path);
+			_generateDirectoryList(file_path);
 		} else {
 			prepareResponseError(403);
 		}
@@ -21,19 +21,18 @@ int Response::_isDirectory( const std::string& full_path ) {
 	return 0;
 }
 
-void Response::_generateDirectoryList( const std::string& dir_path,
-									   const std::string& file_path ) {
+void Response::_generateDirectoryList( const std::string& file_path ) {
 	std::ostringstream html;
 	html << "<html><body><h1>Index of " << file_path << "</h1>\n<hr><pre><table>\n";
-	DIR *dir = opendir(dir_path.c_str());
+	DIR *dir = opendir(local_path.c_str());
 	if (dir == nullptr) {
 		prepareResponseError(403);
-		logger.warning("Failed to open directory" + dir_path);
+		logger.warning("Failed to open directory" + local_path);
 		return;
 	}
 	struct dirent *entry;
 	while ((entry = readdir(dir)) != nullptr) {
-		html << _getEntryLine(entry, dir_path);
+		html << _getEntryLine(entry);
 	}
 	closedir(dir);
 	html << "</table>\n</pre><hr></body>\n</html>\n";
@@ -41,10 +40,10 @@ void Response::_generateDirectoryList( const std::string& dir_path,
 	full_response += std::to_string(html.str().size())+ "\r\n\r\n" + html.str();
 }
 
-std::string Response::_getEntryLine( struct dirent* entry, const std::string& dir_path ) {
+std::string Response::_getEntryLine( struct dirent* entry ) {
 	std::string name, full_path, size, mod_time;
 	name = entry->d_name;
-	full_path = dir_path + name;
+	full_path = local_path + name;
 	if (name == ".") {
 		return "";
 	}

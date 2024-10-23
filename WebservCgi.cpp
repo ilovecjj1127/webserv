@@ -18,8 +18,7 @@ int Webserv::_endCgi( int fd_res[2], int fd_body[2], int client_fd ) {
 }
 
 int Webserv::_executeChild( int client_fd ) {
-	std::string path = _clients_map[client_fd].response.location->root;
-	path += _clients_map[client_fd].request.path;
+	std::string path = _clients_map[client_fd].response.local_path;
 	std::vector<char*> cmds = {
 		const_cast<char*>("python3"),
 		const_cast<char*>(path.c_str()),

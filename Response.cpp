@@ -11,33 +11,35 @@ Response::Response( const Response& other ) : logger(Logger::getInstance()) {
 Response& Response::operator = ( const Response& other ) {
 	if (this != &other) {
 		full_response = other.full_response;
+		local_path = other.local_path;
 		location = other.location;
 	}
 	return (*this);
 }
 
-int Response::prepareResponse( const std::string& file_path, size_t status_code ) {
+int Response::prepareResponse( const std::string& request_path, size_t status_code ) {
 	std::string& root_path = location->root;
-	std::string full_path = root_path + file_path;
+	std::string file_path = request_path.substr(location->path.size());
+	local_path = root_path + file_path;
 	if (file_path == location->path && !location->index_page.empty()) {
 		std::string index_page = "/" + location->index_page;
 		if (access((root_path + index_page).c_str(), F_OK) == 0) {
 			return prepareResponse(index_page, 200);
 		}
-	} else if (_checkIfDirectory(file_path, full_path)) {
+	} else if (_checkIfDirectory(file_path)) {
 		return 1;
 	}
 	std::string extension = _getFileExtension(file_path);
 	if (extension == "py") {
-		return _checkCgiAccess(full_path);
+		return _checkCgiAccess();
 	}
-	_prepareStaticFile(full_path, extension, status_code);
+	_prepareStaticFile(extension, status_code);
 	return 1;
 }
 
-int Response::_checkCgiAccess( const std::string& full_path ) {
-	logger.debug("CGI file: " + full_path);
-	if (access(full_path.c_str(), X_OK) == 0) {
+int Response::_checkCgiAccess( void ) {
+	logger.debug("CGI file: " + local_path);
+	if (access(local_path.c_str(), X_OK) == 0) {
 		return 0;
 	} else {
 		prepareResponseError(404);
@@ -45,11 +47,10 @@ int Response::_checkCgiAccess( const std::string& full_path ) {
 	}
 }
 
-void Response::_prepareStaticFile(const std::string& path, const std::string& extension,
-								  size_t status_code ) {
-	std::ifstream file(path);
-	if (_isDirectory(path) || !file.is_open()) {
-		logger.warning("Failed to open file: " + path);
+void Response::_prepareStaticFile(const std::string& extension, size_t status_code ) {
+	std::ifstream file(local_path);
+	if (_isDirectory(local_path) || !file.is_open()) {
+		logger.warning("Failed to open file: " + local_path);
 		prepareResponseError(404);
 		return;
 	}

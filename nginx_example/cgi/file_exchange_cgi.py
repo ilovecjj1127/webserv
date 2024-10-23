@@ -15,8 +15,9 @@ import sys
 
 class CgiComponents:
 	def __init__(self):
+		self.endpoint = os.environ.get("PATH_INFO", "")
 		self.upload_form = "<br><h2>Upload file</h2>" \
-			"<form method='POST' action='/cgi/file_exchange_cgi.py'" \
+			f"<form method='POST' action='{self.endpoint}'" \
 				"enctype='multipart/form-data'>" \
 			"<label for='file'>Choose a file:</label><br><br>" \
 			"<input type='file' id='file' name='file' required><br><br>" \
@@ -26,7 +27,7 @@ class CgiComponents:
 		delete_button = f"<form class='deleteFileForm' data-filename='{filename}' " \
 						"style='display:inline;'>" \
 						"<input type='submit' value='Delete'></form>"
-		download_button = "<form method='GET' action='/cgi/file_exchange_cgi.py' " \
+		download_button = f"<form method='GET' action='{self.endpoint}' " \
 						  "style='display:inline;'>" \
 						  f"<input type='hidden' name='filename' value='{filename}'>" \
 						  "<input type='submit' value='Download'></form>"
@@ -131,6 +132,7 @@ class Cgi:
 		response.body += self.components.upload_form
 		with open(self.delete_js_filepath, "r") as js_file:
 			js_script = js_file.read()
+		response.body += f"<input type='hidden' id='cgi-url' value='{self.components.endpoint}'>"
 		response.body += f"<script>\n{js_script}</script>"
 	
 	def _send_file(self, response: Response):

@@ -5,7 +5,8 @@ import cgi
 
 
 def get_main_page() -> str:
-	return "<form method='POST' action='/cgi/form_cgi.py'>" \
+	endpoint = os.environ.get("PATH_INFO", "")
+	return f"<form method='POST' action='{endpoint}'>" \
 		   "<label for='name'>Name:</label>" \
 		   "<input type='text' id='name' name='name'><br><br>" \
 		   "<label for='city'>City:</label>" \

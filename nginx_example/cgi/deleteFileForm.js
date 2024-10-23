@@ -1,8 +1,10 @@
+var cgiUrl = document.getElementById('cgi-url').value;
+
 document.querySelectorAll('.deleteFileForm').forEach(form => {
 	form.addEventListener('submit', function(event) {
 		event.preventDefault();
 		var filename = this.getAttribute('data-filename');
-		fetch('/cgi/file_exchange_cgi.py', {
+		fetch(cgiUrl, {
 			method: 'DELETE',
 			headers: {
 				'Content-Type': 'application/x-www-form-urlencoded',
