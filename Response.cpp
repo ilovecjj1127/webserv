@@ -18,9 +18,9 @@ Response& Response::operator = ( const Response& other ) {
 }
 
 int Response::prepareResponse( const std::string& request_path, size_t status_code ) {
-	std::string& root_path = location->root;
+	std::string root_path = location->root;
 	std::string file_path = request_path.substr(location->path.size());
-	local_path = root_path + file_path;
+	local_path = _build_path(root_path, file_path);
 	if (file_path == location->path && !location->index_page.empty()) {
 		std::string index_page = "/" + location->index_page;
 		if (access((root_path + index_page).c_str(), F_OK) == 0) {

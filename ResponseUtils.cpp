@@ -1,5 +1,13 @@
 #include "Response.hpp"
 
+std::string Response::_build_path( const std::string& first, const std::string& second ) {
+	if (first.back() == '/' || second.empty() || second.front() == '/') {
+		return first + second;
+	} else {
+		return first + "/" + second;
+	}
+}
+
 std::string Response::_getFileExtension( const std::string& filepath ) {
 	size_t pos = filepath.rfind('.');
 	if (pos == std::string::npos) {

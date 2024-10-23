@@ -43,7 +43,7 @@ void Response::_generateDirectoryList( const std::string& file_path ) {
 std::string Response::_getEntryLine( struct dirent* entry ) {
 	std::string name, full_path, size, mod_time;
 	name = entry->d_name;
-	full_path = local_path + name;
+	full_path = _build_path(local_path, name);
 	if (name == ".") {
 		return "";
 	}

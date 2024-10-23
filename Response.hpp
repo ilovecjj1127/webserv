@@ -37,6 +37,7 @@ private:
 	void _getEntryStats( const std::string& path, std::string& size, std::string& mod_time );
 
 	// ResponseUtils.cpp
+	std::string _build_path( const std::string& first, const std::string& second );
 	std::string _getFileExtension( const std::string& filepath );
 	int _stringToInt( const std::string& str );
 
