@@ -30,7 +30,7 @@ int Response::prepareResponse( const std::string& request_path, size_t status_co
 		return 1;
 	}
 	std::string extension = _getFileExtension(file_path);
-	if (extension == "py") {
+	if (extension == "py" || extension == "php") {
 		return _checkCgiAccess();
 	}
 	_prepareStaticFile(extension, status_code);

@@ -19,8 +19,11 @@ int Webserv::_endCgi( int fd_res[2], int fd_body[2], int client_fd ) {
 
 int Webserv::_executeChild( int client_fd ) {
 	std::string path = _clients_map[client_fd].response.local_path;
+	std::string extension = path.substr(path.rfind('.') + 1);
+	std::string interpreter = (extension == "py" ? "python3" : "php");
+	std::string executor = "/usr/bin/" + interpreter;
 	std::vector<char*> cmds = {
-		const_cast<char*>("python3"),
+		const_cast<char*>(interpreter.c_str()),
 		const_cast<char*>(path.c_str()),
 		nullptr
 	};
@@ -31,7 +34,7 @@ int Webserv::_executeChild( int client_fd ) {
 		envp.push_back(const_cast<char*>(env.c_str()));
 	}
 	envp.push_back(nullptr);
-	execve("/usr/bin/python3", cmds.data(), envp.data());
+	execve(executor.c_str(), cmds.data(), envp.data());
 	exit(EXIT_FAILURE);
 }
 
