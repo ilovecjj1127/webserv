@@ -38,51 +38,6 @@ void Webserv::_stopServer( void ) {
 	}
 }
 
-void Webserv::_fakeConfigParser( void ) {
-	ServerData server1;
-	std::pair<uint32_t, uint16_t> listen_pair1(0, 8081);
-	server1.listen_group.push_back(listen_pair1);
-	
-	Location location1;
-	location1.path = "/";
-	location1.root = "./nginx_example/html";
-	location1.index_page = "index.html";
-	location1.autoindex = true;
-	// location1.error_pages[404] = "./temp/404.html";
-	server1.locations.push_back(location1);
-
-	Location location2;
-	location2.path = "/askme";
-	location2.redirect_path = "https://www.google.com/";
-	location2.redirect_code = 301;
-	server1.locations.push_back(location2);
-
-	Location location3;
-	location3.path = "/cgi";
-	location3.root = "./nginx_example/cgi";
-	location3.autoindex = true;
-	// location3.error_pages[400] = "./temp/404.html";
-	server1.locations.push_back(location3);
-	
-	_servers.push_back(server1);
-
-	ServerData server2;
-	std::pair<uint32_t, uint16_t> listen_pair2(0, 8082);
-	server2.listen_group.push_back(listen_pair2);
-	server2.server_names.push_back("localhost");
-
-	Location location4;
-	location4.path = "/cgi";
-	location4.root = "./nginx_example/cgi";
-	location4.client_max_body_size = 10;
-	server2.locations.push_back(location4);
-
-	_servers.push_back(server2);
-
-	_sortLocationByPath();
-	_printConfig();
-}
-
 void Webserv::_mainLoop( void ) {
 	epoll_event events[_event_array_size];
 	time_t last_timeout_check = time(nullptr);

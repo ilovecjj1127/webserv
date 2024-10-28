@@ -1,17 +1,9 @@
 #!/usr/bin/env python3
 
 import cgi
-import cgitb
-import logging
 import os
 import sys
 
-
-# logging.basicConfig(
-# 	filename="/usr/share/nginx/media/out.log",
-# 	format='%(asctime)s - %(levelname)s: %(message)s',
-# 	level=logging.DEBUG
-# )
 
 class CgiComponents:
 	def __init__(self):
@@ -95,8 +87,8 @@ class Response:
 
 class Cgi:
 	def __init__(self):
-		self.uploads_dir = "./nginx_example/media"
-		self.delete_js_filepath = "./nginx_example/cgi/deleteFileForm.js"
+		self.uploads_dir = "./data/media"
+		self.delete_js_filepath = "./data/cgi/deleteFileForm.js"
 		self.storage = cgi.FieldStorage()
 		self.components = CgiComponents()
 
@@ -191,7 +183,6 @@ class Cgi:
 
 
 def run_cgi():
-	cgitb.enable()
 	cgi = Cgi()
 	cgi.handle_request()
 

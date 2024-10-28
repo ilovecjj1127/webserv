@@ -98,7 +98,6 @@ int Webserv::_getTargetLocation( int client_fd ) {
 	for (auto& location : locations) {
 		if (path.compare(0, location.path.size(), location.path) == 0) {
 			response.location = &location;
-			// path.erase(0, location.path.size());
 			if (path.front() != '/') path.insert(0, 1, '/');
 			logger.debug("Found Path: " + location.path);
 			return 0;

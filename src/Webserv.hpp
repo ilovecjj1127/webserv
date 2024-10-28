@@ -78,7 +78,6 @@ private:
 	void _getTargetServer(int client_fd, const std::string& host);
 
 	// WebservConfig.cpp
-	void _fakeConfigParser( void );
 	void _sortLocationByPath( void );
 	void _printConfig( void ) const;
 	int _parseConfigFile( const std::string& config_path );

@@ -20,11 +20,11 @@ Response& Response::operator = ( const Response& other ) {
 int Response::prepareResponse( const std::string& request_path, size_t status_code ) {
 	std::string root_path = location->root;
 	std::string file_path = request_path.substr(location->path.size());
+	if (file_path.front() != '/') file_path.insert(0, 1, '/');
 	local_path = _build_path(root_path, file_path);
-	if (file_path == location->path && !location->index_page.empty()) {
-		std::string index_page = "/" + location->index_page;
-		if (access((root_path + index_page).c_str(), F_OK) == 0) {
-			return prepareResponse(index_page, 200);
+	if (file_path == "/" && !location->index_page.empty()) {
+		if (access(_build_path(root_path, location->index_page).c_str(), F_OK) == 0) {
+			return prepareResponse(_build_path(location->path, location->index_page), 200);
 		}
 	} else if (_checkIfDirectory(file_path)) {
 		return 1;

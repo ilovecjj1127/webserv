@@ -1,19 +1,29 @@
 NAME = webserv
 
+SRC_DIR = src
 OBJ_DIR = obj
 
-SOURCES = Webserv.cpp WebservInit.cpp WebservEvents.cpp WebservCgi.cpp WebservUtils.cpp \
-		  Response.cpp ResponseConsts.cpp ResponseDirectory.cpp ResponseUtils.cpp \
-		  WebservConfig.cpp \
-		  Logger.cpp Request.cpp main.cpp 
+SOURCES = $(addprefix $(SRC_DIR)/, main.cpp \
+	Webserv.cpp \
+	WebservInit.cpp \
+	WebservEvents.cpp \
+	WebservCgi.cpp \
+	WebservUtils.cpp \
+	Response.cpp \
+	ResponseConsts.cpp \
+	ResponseDirectory.cpp \
+	ResponseUtils.cpp \
+	WebservConfig.cpp \
+	Logger.cpp \
+	Request.cpp)
 
-OBJECTS = $(addprefix $(OBJ_DIR)/, $(SOURCES:.cpp=.o))
+OBJECTS = $(addprefix $(OBJ_DIR)/, $(notdir $(SOURCES:.cpp=.o)))
 
 CFLAGS += -Wall -Wextra -Werror -std=c++20 -g
 
 all: $(NAME)
 
-$(OBJ_DIR)/%.o: %.cpp
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp
 	@mkdir -p $(OBJ_DIR)
 	c++ $(CFLAGS) -c $< -o $@
 
@@ -28,4 +38,6 @@ fclean: clean
 
 re: fclean all
 
-.PHONY: all clean fclean re
+bonus: all
+
+.PHONY: all clean fclean re bonus

@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 import cgi
-import cgitb
 import hashlib
 import json
 import os
@@ -12,7 +11,7 @@ class Cgi:
 	def __init__(self):
 		self.session_id = 0
 		self.username = ""
-		self.db_filename = "./nginx_example/cgi/fake_db.json"
+		self.db_filename = "./data/cgi/fake_db.json"
 		self.storage = cgi.FieldStorage()
 
 	def handle_request(self):
@@ -133,6 +132,5 @@ class Cgi:
 
 
 if __name__ == "__main__":
-	cgitb.enable()
 	cgi = Cgi()
 	cgi.handle_request()

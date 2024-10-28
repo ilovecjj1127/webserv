@@ -8,3 +8,4 @@ valgrind*
 suppressions.supp
 webserv
 practice/
+nginx_example/
